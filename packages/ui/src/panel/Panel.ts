@@ -17,6 +17,34 @@ export interface PanelConfig {
 	promptForNextTask?: boolean
 }
 
+/** localStorage key for persisting LLM settings entered via the settings dialog. */
+const SETTINGS_STORAGE_KEY = 'page-agent:llm-settings'
+
+interface PersistedLLMSettings {
+	model?: string
+	baseURL?: string
+	apiKey?: string
+}
+
+function loadPersistedSettings(): PersistedLLMSettings | null {
+	try {
+		const raw = localStorage.getItem(SETTINGS_STORAGE_KEY)
+		if (!raw) return null
+		const parsed = JSON.parse(raw)
+		return typeof parsed === 'object' && parsed ? parsed : null
+	} catch {
+		return null
+	}
+}
+
+function savePersistedSettings(settings: PersistedLLMSettings): void {
+	try {
+		localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+	} catch {
+		/* quota exceeded / privacy mode — surface nothing, settings just won't persist */
+	}
+}
+
 /**
  * Agent control panel
  *
@@ -36,6 +64,8 @@ export class Panel {
 	#actionButton: HTMLElement
 	#inputSection: HTMLElement
 	#taskInput: HTMLInputElement
+	#settingsButton: HTMLElement | null = null
+	#settingsOverlay: HTMLElement | null = null
 
 	#agent: PanelAgentAdapter
 	#config: PanelConfig
@@ -79,6 +109,14 @@ export class Panel {
 		this.#actionButton = this.#wrapper.querySelector(`.${styles.stopButton}`)!
 		this.#inputSection = this.#wrapper.querySelector(`.${styles.inputSectionWrapper}`)!
 		this.#taskInput = this.#wrapper.querySelector(`.${styles.taskInput}`)!
+		this.#settingsButton = this.#wrapper.querySelector(`.${styles.settingsButton}`)
+
+		// Restore any persisted settings before the first task so the agent
+		// uses the user's last-saved values without a manual round-trip.
+		if (this.#agent.updateLLMConfig) {
+			const persisted = loadPersistedSettings()
+			if (persisted) this.#agent.updateLLMConfig(persisted)
+		}
 
 		// Listen to agent events
 		this.#agent.addEventListener('statuschange', this.#onStatusChange)
@@ -247,6 +285,7 @@ export class Panel {
 		this.#isWaitingForUserAnswer = false
 		this.#stopHeaderUpdateLoop()
 		this.wrapper.remove()
+		this.#settingsOverlay?.remove()
 	}
 
 	// ========== Private methods ==========
@@ -376,6 +415,11 @@ export class Panel {
 		wrapper.setAttribute('data-browser-use-ignore', 'true')
 		wrapper.setAttribute('data-page-agent-ignore', 'true')
 
+		const settingsSupported = typeof this.#agent.updateLLMConfig === 'function'
+		const settingsButtonHTML = settingsSupported
+			? `<button class="${styles.controlButton} ${styles.settingsButton}" title="${this.#i18n.t('ui.panel.settings')}">⚙</button>`
+			: ''
+
 		wrapper.innerHTML = `
 			<div class="${styles.background}"></div>
 			<div class="${styles.historySectionWrapper}">
@@ -394,6 +438,7 @@ export class Panel {
 					<div class="${styles.statusText}">${this.#i18n.t('ui.panel.ready')}</div>
 				</div>
 				<div class="${styles.controls}">
+					${settingsButtonHTML}
 					<button class="${styles.controlButton} ${styles.expandButton}" title="${this.#i18n.t('ui.panel.expand')}">
 						▼
 					</button>
@@ -404,9 +449,9 @@ export class Panel {
 			</div>
 			<div class="${styles.inputSectionWrapper} ${styles.hidden}">
 				<div class="${styles.inputSection}">
-					<input 
-						type="text" 
-						class="${styles.taskInput}" 
+					<input
+						type="text"
+						class="${styles.taskInput}"
 						maxlength="${taskInputMaxLength}"
 					/>
 				</div>
@@ -414,7 +459,138 @@ export class Panel {
 		`
 
 		document.body.appendChild(wrapper)
+
+		if (settingsSupported) {
+			this.#settingsOverlay = this.#createSettingsOverlay()
+			document.body.appendChild(this.#settingsOverlay)
+		}
+
 		return wrapper
+	}
+
+	#createSettingsOverlay(): HTMLElement {
+		const overlay = document.createElement('div')
+		overlay.className = styles.settingsOverlay
+		overlay.setAttribute('data-browser-use-ignore', 'true')
+		overlay.setAttribute('data-page-agent-ignore', 'true')
+		overlay.innerHTML = `
+			<div class="${styles.settingsDialog}">
+				<div class="${styles.settingsHeader}">
+					<h3>${this.#i18n.t('ui.panel.settingsTitle')}</h3>
+					<button class="${styles.settingsClose}" type="button" data-action="close">X</button>
+				</div>
+				<label>
+					<span class="${styles.labelText}">${this.#i18n.t('ui.panel.settingsModel')}</span>
+					<input type="text" data-field="model" autocomplete="off" spellcheck="false" />
+				</label>
+				<label>
+					<span class="${styles.labelText}">${this.#i18n.t('ui.panel.settingsBaseURL')}</span>
+					<input type="text" data-field="baseURL" autocomplete="off" spellcheck="false" />
+				</label>
+				<label>
+					<span class="${styles.labelText}">${this.#i18n.t('ui.panel.settingsApiKey')}</span>
+					<input type="password" data-field="apiKey" autocomplete="off" spellcheck="false" />
+				</label>
+				<p class="${styles.settingsHint}">${this.#i18n.t('ui.panel.settingsHint')}</p>
+				<p class="${styles.settingsError}" data-role="error" hidden></p>
+				<input type="file" accept="application/json,.json" data-role="import-file" hidden />
+				<div class="${styles.settingsActions}">
+					<button class="${styles.importButton}" type="button" data-action="import">${this.#i18n.t('ui.panel.settingsImport')}</button>
+					<span class="${styles.actionsSpacer}"></span>
+					<button class="${styles.cancelButton}" type="button" data-action="cancel">${this.#i18n.t('ui.panel.settingsCancel')}</button>
+					<button class="${styles.saveButton}" type="button" data-action="save">${this.#i18n.t('ui.panel.settingsSave')}</button>
+				</div>
+			</div>
+		`
+		return overlay
+	}
+
+	#triggerImportFilePicker(): void {
+		const fileInput = this.#settingsOverlay?.querySelector<HTMLInputElement>(
+			'input[data-role="import-file"]'
+		)
+		if (!fileInput) return
+		// Reset value so picking the same file twice still fires `change`.
+		fileInput.value = ''
+		fileInput.click()
+	}
+
+	async #handleImportFile(file: File): Promise<void> {
+		const errorEl = this.#settingsOverlay?.querySelector<HTMLElement>('[data-role="error"]')
+		const showError = (msg: string) => {
+			if (!errorEl) return
+			errorEl.textContent = msg
+			errorEl.hidden = false
+		}
+		const clearError = () => {
+			if (!errorEl) return
+			errorEl.textContent = ''
+			errorEl.hidden = true
+		}
+
+		try {
+			const text = await file.text()
+			const parsed = JSON.parse(text) as Record<string, unknown>
+			if (!parsed || typeof parsed !== 'object') {
+				showError(this.#i18n.t('ui.panel.settingsImportError'))
+				return
+			}
+			const overlay = this.#settingsOverlay
+			if (!overlay) return
+
+			const setField = (field: 'model' | 'baseURL' | 'apiKey', value: unknown) => {
+				if (typeof value !== 'string') return
+				const input = overlay.querySelector<HTMLInputElement>(`input[data-field="${field}"]`)
+				if (input) input.value = value
+			}
+			setField('model', parsed.model)
+			setField('baseURL', parsed.baseURL)
+			setField('apiKey', parsed.apiKey)
+			clearError()
+		} catch {
+			showError(this.#i18n.t('ui.panel.settingsImportError'))
+		}
+	}
+
+	#openSettings(): void {
+		if (!this.#settingsOverlay || !this.#agent.getLLMConfig) return
+		const current = this.#agent.getLLMConfig()
+		const overlay = this.#settingsOverlay
+		const set = (field: string, value: string) => {
+			const input = overlay.querySelector<HTMLInputElement>(`input[data-field="${field}"]`)
+			if (input) input.value = value
+		}
+		set('model', current.model ?? '')
+		set('baseURL', current.baseURL ?? '')
+		set('apiKey', current.apiKey ?? '')
+		// Clear any lingering import-error from a previous session
+		const errorEl = overlay.querySelector<HTMLElement>('[data-role="error"]')
+		if (errorEl) {
+			errorEl.textContent = ''
+			errorEl.hidden = true
+		}
+		overlay.classList.add(styles.visible)
+		// Focus the first field for keyboard convenience.
+		overlay.querySelector<HTMLInputElement>('input[data-field="model"]')?.focus()
+	}
+
+	#closeSettings(): void {
+		this.#settingsOverlay?.classList.remove(styles.visible)
+	}
+
+	#saveSettings(): void {
+		if (!this.#settingsOverlay || !this.#agent.updateLLMConfig) return
+		const overlay = this.#settingsOverlay
+		const get = (field: string) =>
+			overlay.querySelector<HTMLInputElement>(`input[data-field="${field}"]`)?.value.trim() ?? ''
+		const updates = {
+			model: get('model'),
+			baseURL: get('baseURL'),
+			apiKey: get('apiKey'),
+		}
+		this.#agent.updateLLMConfig(updates)
+		savePersistedSettings(updates)
+		this.#closeSettings()
 	}
 
 	#setupEventListeners(): void {
@@ -439,6 +615,33 @@ export class Panel {
 			e.stopPropagation()
 			this.#handleActionButton()
 		})
+
+		// Settings button (only present when agent supports updateLLMConfig)
+		this.#settingsButton?.addEventListener('click', (e) => {
+			e.stopPropagation()
+			this.#openSettings()
+		})
+
+		// Settings overlay — clicks on backdrop close, action buttons handled by data-action
+		this.#settingsOverlay?.addEventListener('click', (e) => {
+			const target = e.target as HTMLElement
+			if (target === this.#settingsOverlay) {
+				this.#closeSettings()
+				return
+			}
+			const action = target.closest<HTMLElement>('[data-action]')?.dataset.action
+			if (action === 'close' || action === 'cancel') this.#closeSettings()
+			else if (action === 'save') this.#saveSettings()
+			else if (action === 'import') this.#triggerImportFilePicker()
+		})
+
+		// Hidden file input for JSON import — populates form fields, doesn't auto-save
+		this.#settingsOverlay
+			?.querySelector<HTMLInputElement>('input[data-role="import-file"]')
+			?.addEventListener('change', (e) => {
+				const file = (e.target as HTMLInputElement).files?.[0]
+				if (file) void this.#handleImportFile(file)
+			})
 
 		// Submit on Enter key in input field
 		this.#taskInput.addEventListener('keydown', (e) => {

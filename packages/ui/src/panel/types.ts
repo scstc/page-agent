@@ -73,4 +73,18 @@ export interface PanelAgentAdapter extends EventTarget {
 
 	/** Dispose the agent (terminal, cannot be reused) */
 	dispose(): void
+
+	/**
+	 * Read the agent's current LLM connection settings. Used to pre-populate
+	 * the in-panel settings form. Optional — when absent the panel hides its
+	 * settings button.
+	 */
+	getLLMConfig?(): { model: string; baseURL: string; apiKey?: string }
+
+	/**
+	 * Apply LLM connection settings; takes effect on the next step's request.
+	 * Implementations should mutate any internal LLM client config in place
+	 * so existing references stay valid.
+	 */
+	updateLLMConfig?(config: { model?: string; baseURL?: string; apiKey?: string }): void
 }
