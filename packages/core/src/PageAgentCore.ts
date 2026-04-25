@@ -94,6 +94,25 @@ export class PageAgentCore extends EventTarget {
 		browserState: null as BrowserState | null,
 	}
 
+	/**
+	 * A speculatively-fetched next step, captured during a long wait.
+	 * The next loop iteration consumes this instead of running its own
+	 * observe + LLM call, hiding LLM latency inside the wait window.
+	 * Cleared whenever consumed or invalidated.
+	 */
+	#prefetched: {
+		input: MacroToolInput
+		browserState: BrowserState
+		usage: {
+			promptTokens: number
+			completionTokens: number
+			totalTokens: number
+			cachedTokens?: number
+		}
+		rawResponse: unknown
+		rawRequest: unknown
+	} | null = null
+
 	constructor(config: PageAgentCoreConfig) {
 		super()
 
@@ -177,6 +196,39 @@ export class PageAgentCore extends EventTarget {
 	}
 
 	/**
+	 * Read the current LLM connection settings — model, baseURL, apiKey.
+	 * Used by the panel's settings dialog to pre-populate the form.
+	 */
+	getLLMConfig(): { model: string; baseURL: string; apiKey?: string } {
+		return {
+			model: this.config.model,
+			baseURL: this.config.baseURL,
+			apiKey: this.config.apiKey,
+		}
+	}
+
+	/**
+	 * Apply LLM connection settings at runtime. Mutates both the agent's
+	 * config and the LLM client's internal config in place so the change
+	 * takes effect on the next request — existing LLM/client references
+	 * (including the OpenAIClient that only stores a reference) keep working.
+	 */
+	updateLLMConfig(updates: { model?: string; baseURL?: string; apiKey?: string }): void {
+		if (updates.model !== undefined) {
+			this.config.model = updates.model
+			this.#llm.config.model = updates.model
+		}
+		if (updates.baseURL !== undefined) {
+			this.config.baseURL = updates.baseURL
+			this.#llm.config.baseURL = updates.baseURL
+		}
+		if (updates.apiKey !== undefined) {
+			this.config.apiKey = updates.apiKey
+			this.#llm.config.apiKey = updates.apiKey
+		}
+	}
+
+	/**
 	 * Push an observation message to the history event stream.
 	 * This will be visible in <agent_history> and remain persistent in memory across steps.
 	 * @experimental @internal
@@ -235,35 +287,79 @@ export class PageAgentCore extends EventTarget {
 
 				await onBeforeStep?.(this, step)
 
-				// observe
+				let macroResult!: MacroToolResult
+				let usage!: {
+					promptTokens: number
+					completionTokens: number
+					totalTokens: number
+					cachedTokens?: number
+				}
+				let rawResponse: unknown
+				let rawRequest: unknown
 
-				console.log(chalk.blue.bold('👀 Observing...'))
+				const prefetched = this.#prefetched
+				this.#prefetched = null
+				let consumedPrefetch = false
 
-				this.#states.browserState = await this.pageController.getBrowserState()
-				await this.#handleObservations(step)
+				if (prefetched) {
+					// Re-observe to validate the prefetch is still applicable.
+					// URL match alone — strict simplifiedHTML equality fails on benign
+					// drift (active-link highlight, lazy fonts, scroll-position hint
+					// in the header), which would invalidate every prefetch on SPA
+					// route changes and erase the savings. A URL change is the
+					// signal we actually care about: indices live in the same page.
+					console.log(chalk.cyan.bold('🔮 Validating prefetched step...'))
+					this.#states.browserState = await this.pageController.getBrowserState()
+					const fresh = this.#states.browserState
+					const valid = fresh?.url === prefetched.browserState.url
 
-				// assemble prompts
+					if (valid) {
+						await this.#handleObservations(step)
+						this.#emitActivity({ type: 'thinking' })
 
-				const messages = [
-					{ role: 'system' as const, content: this.#getSystemPrompt() },
-					{ role: 'user' as const, content: await this.#assembleUserPrompt() },
-				]
+						console.log(chalk.cyan.bold('🔮 Consuming prefetched step (no LLM call needed)'))
+						const macroTool = this.#packMacroTool()
+						macroResult = await macroTool.execute(prefetched.input)
+						usage = prefetched.usage
+						rawResponse = prefetched.rawResponse
+						rawRequest = prefetched.rawRequest
+						consumedPrefetch = true
+					} else {
+						console.log(chalk.yellow.bold('🔮 Prefetch invalidated (page changed during wait)'))
+					}
+				}
 
-				const macroTool = { AgentOutput: this.#packMacroTool() }
+				if (!consumedPrefetch) {
+					// Normal observe → LLM → execute path
 
-				// invoke LLM
+					if (!prefetched) {
+						console.log(chalk.blue.bold('👀 Observing...'))
+						this.#states.browserState = await this.pageController.getBrowserState()
+					}
+					// (else: browserState was just refreshed for prefetch validation)
+					await this.#handleObservations(step)
 
-				console.log(chalk.blue.bold('🧠 Thinking...'))
-				this.#emitActivity({ type: 'thinking' })
+					const messages = [
+						{ role: 'system' as const, content: this.#getSystemPrompt() },
+						{ role: 'user' as const, content: await this.#assembleUserPrompt() },
+					]
+					const macroTool = { AgentOutput: this.#packMacroTool() }
 
-				const result = await this.#llm.invoke(messages, macroTool, this.#abortController.signal, {
-					toolChoiceName: 'AgentOutput',
-					normalizeResponse: (res) => normalizeResponse(res, this.tools),
-				})
+					console.log(chalk.blue.bold('🧠 Thinking...'))
+					this.#emitActivity({ type: 'thinking' })
+
+					const result = await this.#llm.invoke(messages, macroTool, this.#abortController.signal, {
+						toolChoiceName: 'AgentOutput',
+						normalizeResponse: (res) => normalizeResponse(res, this.tools),
+					})
+					macroResult = result.toolResult as MacroToolResult
+					usage = result.usage
+					rawResponse = result.rawResponse
+					rawRequest = result.rawRequest
+				}
 
 				// assemble history
 
-				const macroResult = result.toolResult as MacroToolResult
 				const input = macroResult.input
 				const output = macroResult.output
 				const reflection: Partial<AgentReflection> = {
@@ -283,9 +379,9 @@ export class PageAgentCore extends EventTarget {
 					stepIndex: step,
 					reflection,
 					action,
-					usage: result.usage,
-					rawResponse: result.rawResponse,
-					rawRequest: result.rawRequest,
+					usage,
+					rawResponse,
+					rawRequest,
 				} as AgentStepEvent)
 				this.#emitHistoryChange()
 
@@ -411,8 +507,23 @@ export class PageAgentCore extends EventTarget {
 
 				const startTime = Date.now()
 
+				// While a long `wait` is running, speculatively run the next step's
+				// observe + LLM call in parallel. The next loop iteration can then
+				// execute the chosen action immediately when the wait timer ends,
+				// hiding ~LLM-roundtrip seconds inside the user-requested delay.
+				const PREFETCH_WAIT_THRESHOLD_S = 5
+				const isLongWait =
+					toolName === 'wait' && (toolInput?.seconds ?? 0) >= PREFETCH_WAIT_THRESHOLD_S
+				const prefetchPromise: Promise<void> = isLongWait
+					? this.#prefetchNextStep({
+							input,
+							projectedOutput: `✅ Waited for ${toolInput.seconds} seconds.`,
+						})
+					: Promise.resolve()
+
 				// Execute tool, bind `this` to PageAgent
 				const result = await tool.execute.bind(this)(toolInput)
+				await prefetchPromise
 
 				const duration = Date.now() - startTime
 				console.log(chalk.green.bold(`Tool (${toolName}) executed for ${duration}ms`), result)
@@ -439,6 +550,97 @@ export class PageAgentCore extends EventTarget {
 					output: result,
 				}
 			},
+		}
+	}
+
+	/**
+	 * Speculatively run the next step's observe + LLM call during a long wait.
+	 *
+	 * Captured via a no-op macroTool so the LLM's chosen action is recorded
+	 * but not executed. The real macroTool runs the action in the next loop
+	 * iteration, where validation also rules out stale prefetches if the
+	 * page changed during the wait.
+	 */
+	async #prefetchNextStep(currentStep: {
+		input: MacroToolInput
+		projectedOutput: string
+	}): Promise<void> {
+		try {
+			// Reuse the just-observed browserState from the main loop instead of
+			// re-running getBrowserState(): a fresh DOM extraction would update
+			// PageController.lastTimeUpdate, racing with the wait tool's
+			// getLastUpdateTime() and silently neutering its LLM-time subtraction.
+			// The page can't have meaningfully changed between observe and now —
+			// the validation in the next iteration handles drift.
+			const browserState = this.#states.browserState
+			if (!browserState) return
+
+			// Synthesize the in-flight step into history so the prefetched LLM call
+			// sees the wait as already complete. Otherwise it re-derives
+			// "next goal: wait" and we end up consuming a duplicate wait.
+			const inFlightActionName = Object.keys(currentStep.input.action)[0]
+			const syntheticStep: AgentStepEvent = {
+				type: 'step',
+				stepIndex: this.history.filter((e) => e.type === 'step').length,
+				reflection: {
+					evaluation_previous_goal: currentStep.input.evaluation_previous_goal,
+					memory: currentStep.input.memory,
+					next_goal: currentStep.input.next_goal,
+				},
+				action: {
+					name: inFlightActionName,
+					input: currentStep.input.action[inFlightActionName],
+					output: currentStep.projectedOutput,
+				},
+				usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+			}
+			this.history.push(syntheticStep)
+
+			let messages
+			try {
+				messages = [
+					{ role: 'system' as const, content: this.#getSystemPrompt() },
+					{ role: 'user' as const, content: await this.#assembleUserPrompt() },
+				]
+			} finally {
+				// Pop synthetic step. Direct array mutation, no historychange dispatch
+				// — the real step entry will be pushed (and emit) by the main loop
+				// once the wait actually completes.
+				this.history.pop()
+			}
+
+			const realMacroTool = this.#packMacroTool()
+			const captureMacroTool = {
+				AgentOutput: {
+					description: realMacroTool.description,
+					inputSchema: realMacroTool.inputSchema,
+					execute: async (input: MacroToolInput): Promise<MacroToolInput> => input,
+				} as Tool<MacroToolInput, MacroToolInput>,
+			}
+
+			const invokeResult = await this.#llm.invoke(
+				messages,
+				captureMacroTool,
+				this.#abortController.signal,
+				{
+					toolChoiceName: 'AgentOutput',
+					normalizeResponse: (res) => normalizeResponse(res, this.tools),
+				}
+			)
+
+			this.#prefetched = {
+				input: invokeResult.toolResult as MacroToolInput,
+				browserState,
+				usage: invokeResult.usage,
+				rawResponse: invokeResult.rawResponse,
+				rawRequest: invokeResult.rawRequest,
+			}
+			console.log(chalk.cyan.bold('🔮 Prefetched next step during wait'))
+		} catch (e) {
+			if ((e as { rawError?: { name?: string } })?.rawError?.name !== 'AbortError') {
+				console.warn(chalk.yellow('Prefetch failed, will fall back to normal flow:'), e)
+			}
+			this.#prefetched = null
 		}
 	}
 

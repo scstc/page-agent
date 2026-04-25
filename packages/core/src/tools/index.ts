@@ -52,10 +52,26 @@ tools.set(
 			seconds: z.number().min(1).max(3600).default(1),
 		}),
 		execute: async function (this: PageAgentCore, input) {
-			// try to subtract LLM calling time from the actual wait time
+			// Treat input.seconds as the *total* interval from the previous action
+			// commit to the next action commit, not just the sleep duration.
+			//
+			// Subtract two known overheads so click → wait → next-click lands at
+			// exactly input.seconds:
+			//   1. Elapsed-since-last-DOM-observe — covers the just-completed LLM
+			//      call plus any URL-nav stabilize delay in handleObservations.
+			//   2. POST_OVERHEAD — validate observe + tool execute + history push
+			//      that runs after the wait when a prefetched next step is
+			//      consumed (~1s, tight variance). Only applied to long waits
+			//      (>=5s), which is also when the prefetch path kicks in.
+			// Conservative: typical click is 0.6-2s with high variance. We'd rather
+			// land at 30.5-31s than risk dipping below the user's requested 30s.
+			const POST_OVERHEAD_S = input.seconds >= 5 ? 1.0 : 0
 			const lastTimeUpdate = await this.pageController.getLastUpdateTime()
-			const actualWaitTime = Math.max(0, input.seconds - (Date.now() - lastTimeUpdate) / 1000)
-			console.log(`actualWaitTime: ${actualWaitTime} seconds`)
+			const elapsed = (Date.now() - lastTimeUpdate) / 1000
+			const actualWaitTime = Math.max(0, input.seconds - elapsed - POST_OVERHEAD_S)
+			console.log(
+				`actualWaitTime: ${actualWaitTime} seconds (elapsed=${elapsed.toFixed(2)}, post-overhead=${POST_OVERHEAD_S})`
+			)
 			await waitFor(actualWaitTime)
 
 			return `✅ Waited for ${input.seconds} seconds.`
