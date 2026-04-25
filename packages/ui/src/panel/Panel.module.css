@@ -207,6 +207,11 @@
 			&:hover {
 				background: rgba(255, 255, 255, 0.2);
 			}
+
+			/* `display: flex` above beats the user-agent rule for [hidden]; restore it. */
+			&[hidden] {
+				display: none;
+			}
 		}
 
 		.stopButton {
@@ -221,6 +226,10 @@
 
 		.settingsButton {
 			font-size: 14px;
+		}
+
+		.quickTasksButton {
+			font-size: 13px;
 		}
 	}
 }
@@ -669,9 +678,12 @@
 	visibility: visible;
 	overflow: hidden;
 
-	height: 48px;
+	min-height: 86px;
 
-	transition: all 0.2s;
+	transition:
+		min-height 0.2s,
+		height 0.2s,
+		visibility 0.2s;
 
 	background: rgba(186, 186, 186, 0.2);
 	backdrop-filter: blur(10px);
@@ -685,30 +697,35 @@
 	&.hidden {
 		visibility: collapse;
 		height: 0;
+		min-height: 0;
 	}
 
 	.inputSection {
 		display: flex;
-		align-items: center;
-		gap: 4px;
-		padding: 8px 8px;
+		align-items: flex-end;
+		gap: 8px;
+		padding: 8px;
+		position: relative;
 
 		.taskInput {
 			flex: 1;
 			background: rgba(255, 255, 255, 0.4);
 			border: 1px solid rgba(255, 255, 255, 0.3);
 			border-radius: 10px;
-			padding-inline: 10px;
+			padding: 8px 44px 8px 10px; /* right padding leaves room for the send button */
 			color: rgb(20, 20, 20);
 			font-size: 12px;
-			height: 28px;
-			line-height: 1;
+			min-height: 64px; /* fits ~3 rows */
+			max-height: 140px;
+			line-height: 1.45;
 			outline: none;
-			transition: all 0.2s ease;
-
-			/* text-shadow: 0 0 2px rgba(255, 255, 255, 0.8); */
-
-			/* border-color: rgba(57, 182, 255, 0.3); */
+			resize: none;
+			overflow-y: auto;
+			font-family: inherit;
+			transition:
+				background 0.2s ease,
+				border-color 0.2s ease,
+				box-shadow 0.2s ease;
 
 			&::placeholder {
 				color: rgb(53, 53, 53);
@@ -718,6 +735,56 @@
 				background: rgba(255, 255, 255, 0.8);
 				border-color: rgba(57, 182, 255, 0.6);
 				box-shadow: 0 0 0 2px rgba(57, 182, 255, 0.2);
+			}
+		}
+
+		/* Floats in the textarea's bottom-right corner so it doesn't shrink the
+		   text area itself; padding-right above reserves the room. */
+		.sendButton {
+			position: absolute;
+			right: 14px;
+			bottom: 14px;
+			width: 28px;
+			height: 28px;
+			padding: 0;
+			border-radius: 50%;
+			border: none;
+			background: rgb(57, 182, 255);
+			color: white;
+			line-height: 0;
+			cursor: pointer;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			box-shadow: 0 2px 6px rgba(57, 182, 255, 0.35);
+			transition:
+				background 0.15s ease,
+				transform 0.1s ease,
+				box-shadow 0.15s ease,
+				opacity 0.15s ease;
+
+			svg {
+				display: block;
+				/* The send-fill silhouette has its visual centroid slightly above-left
+				   of its bounding-box center; nudge a hair to land it in the middle. */
+				transform: translate(-0.5px, 0.5px);
+			}
+
+			&:hover:not(:disabled) {
+				background: rgb(94, 197, 255);
+				transform: translateY(-1px);
+				box-shadow: 0 3px 10px rgba(57, 182, 255, 0.5);
+			}
+
+			&:active:not(:disabled) {
+				transform: translateY(0);
+			}
+
+			&:disabled {
+				background: rgba(255, 255, 255, 0.35);
+				color: rgba(0, 0, 0, 0.45);
+				box-shadow: none;
+				cursor: not-allowed;
 			}
 		}
 	}
@@ -745,7 +812,7 @@
 	}
 
 	.settingsDialog {
-		width: min(420px, calc(100vw - 32px));
+		width: min(560px, calc(100vw - 32px));
 		max-height: calc(100vh - 32px);
 		overflow-y: auto;
 		background: rgb(20, 22, 36);
@@ -878,5 +945,360 @@
 				}
 			}
 		}
+
+		/* Two-pane body: left tab nav, right pane content */
+		.settingsBody {
+			display: flex;
+			gap: 16px;
+			margin-bottom: 14px;
+			min-height: 260px;
+		}
+
+		.settingsNav {
+			display: flex;
+			flex-direction: column;
+			gap: 4px;
+			flex-shrink: 0;
+			width: 120px;
+			padding-right: 12px;
+			border-right: 1px solid rgba(255, 255, 255, 0.08);
+
+			.settingsTab {
+				text-align: left;
+				padding: 8px 10px;
+				border-radius: 6px;
+				border: none;
+				background: transparent;
+				color: rgba(255, 255, 255, 0.7);
+				font-size: 13px;
+				cursor: pointer;
+				font-family: inherit;
+
+				&:hover {
+					background: rgba(255, 255, 255, 0.08);
+					color: white;
+				}
+
+				&.active {
+					background: rgba(57, 182, 255, 0.18);
+					color: white;
+					font-weight: 600;
+				}
+			}
+		}
+
+		.settingsContent {
+			flex: 1;
+			min-width: 0;
+
+			.settingsPane {
+				display: block;
+			}
+
+			.settingsPane[hidden] {
+				display: none;
+			}
+
+			label {
+				margin-bottom: 12px;
+			}
+
+			.paneActions {
+				display: flex;
+				margin-top: 4px;
+
+				button {
+					padding: 7px 14px;
+					border-radius: 6px;
+					border: 1px solid transparent;
+					font-size: 13px;
+					cursor: pointer;
+				}
+
+				.importButton {
+					background: rgba(57, 182, 255, 0.12);
+					color: rgb(126, 207, 255);
+					border-color: rgba(57, 182, 255, 0.3);
+
+					&:hover {
+						background: rgba(57, 182, 255, 0.22);
+					}
+				}
+			}
+		}
+
+		.quickTasksList {
+			list-style: none;
+			margin: 0 0 12px;
+			padding: 0;
+			display: flex;
+			flex-direction: column;
+			gap: 6px;
+		}
+
+		.quickTasksEmpty {
+			color: rgba(255, 255, 255, 0.4);
+			font-size: 12px;
+			padding: 16px 0;
+			text-align: center;
+		}
+
+		.quickTasksItem {
+			display: flex;
+			align-items: stretch;
+			gap: 10px;
+			padding: 10px 12px;
+			background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+			border: 1px solid rgba(255, 255, 255, 0.08);
+			border-radius: 8px;
+
+			.quickTaskBody {
+				flex: 1;
+				min-width: 0;
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+			}
+
+			.quickTaskName {
+				font-size: 13px;
+				font-weight: 600;
+				color: white;
+				line-height: 1.2;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.quickTaskContent {
+				font-size: 11px;
+				line-height: 1.45;
+				color: rgba(255, 255, 255, 0.6);
+				white-space: pre-wrap;
+				word-break: break-word;
+				overflow-wrap: anywhere;
+				display: -webkit-box;
+				-webkit-line-clamp: 3;
+				line-clamp: 3;
+				-webkit-box-orient: vertical;
+				overflow: hidden;
+			}
+
+			.quickTaskRemove {
+				flex-shrink: 0;
+				align-self: flex-start;
+				width: 22px;
+				height: 22px;
+				border-radius: 4px;
+				border: none;
+				background: rgba(239, 68, 68, 0.18);
+				color: rgb(255, 110, 110);
+				cursor: pointer;
+				font-size: 11px;
+				line-height: 1;
+
+				&:hover {
+					background: rgba(239, 68, 68, 0.32);
+				}
+			}
+		}
+
+		.quickTasksAdd {
+			display: flex;
+			flex-direction: column;
+			gap: 8px;
+
+			input,
+			textarea {
+				width: 100%;
+				padding: 7px 10px;
+				border: 1px solid rgba(255, 255, 255, 0.18);
+				border-radius: 6px;
+				background: rgba(255, 255, 255, 0.06);
+				color: white;
+				font-size: 13px;
+				line-height: 1.4;
+				outline: none;
+				font-family: inherit;
+
+				&:focus {
+					border-color: rgba(57, 182, 255, 0.6);
+					box-shadow: 0 0 0 2px rgba(57, 182, 255, 0.2);
+				}
+
+				&:disabled {
+					opacity: 0.5;
+					cursor: not-allowed;
+				}
+			}
+
+			textarea {
+				resize: none;
+				min-height: 64px;
+				max-height: 160px;
+				overflow-y: auto;
+			}
+
+			.addButton {
+				align-self: flex-end;
+				padding: 7px 14px;
+				border-radius: 6px;
+				border: none;
+				background: rgb(57, 182, 255);
+				color: white;
+				font-weight: 600;
+				font-size: 13px;
+				cursor: pointer;
+
+				&:hover {
+					background: rgb(94, 197, 255);
+				}
+
+				&:disabled {
+					opacity: 0.5;
+					cursor: not-allowed;
+				}
+			}
+		}
+	}
+}
+
+/* Floating popover anchored under (or above) the ⚡ header button.
+   Mirrors the historySectionWrapper aesthetic — frosted glass + white-glow
+   border — and styles each item like a historyItem card with a colored
+   accent that cycles through the panel's gradient palette. */
+.quickTasksPopover {
+	position: fixed;
+	z-index: 2147483646;
+	max-height: 320px;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-width: thin;
+	background: rgba(2, 0, 20, 0.55);
+	backdrop-filter: blur(12px);
+	border: 2px solid rgba(255, 255, 255, 0.4);
+	border-radius: 14px;
+	padding: 8px;
+	box-shadow:
+		0 0 0 2px rgba(255, 255, 255, 0.15),
+		0 8px 32px rgba(0, 0, 0, 0.6);
+	display: none;
+	box-sizing: border-box;
+	font-family:
+		-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+	text-shadow: 0 0 1px rgba(0, 0, 0, 0.2);
+
+	* {
+		box-sizing: border-box;
+	}
+
+	&.visible {
+		display: block;
+	}
+
+	.quickTasksPopoverItem {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		width: 100%;
+		text-align: left;
+		padding: 10px 14px;
+		margin-bottom: 6px;
+		background: linear-gradient(
+			135deg,
+			rgba(var(--accent-rgb, 57, 182, 255), 0.18),
+			rgba(var(--accent-rgb, 57, 182, 255), 0.06)
+		);
+		border: none;
+		border-left: 3px solid rgba(var(--accent-rgb, 57, 182, 255), 0.85);
+		border-radius: 8px;
+		color: white;
+		cursor: pointer;
+		font-family: inherit;
+		position: relative;
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.1),
+			0 1px 3px rgba(0, 0, 0, 0.15);
+		transition:
+			background 0.15s ease,
+			transform 0.15s ease;
+
+		&::before {
+			content: '⚡';
+			flex-shrink: 0;
+			font-size: 14px;
+			color: rgba(var(--accent-rgb, 57, 182, 255), 1);
+			filter: drop-shadow(0 0 4px rgba(var(--accent-rgb, 57, 182, 255), 0.55));
+		}
+
+		.popoverItemBody {
+			display: flex;
+			flex-direction: column;
+			gap: 2px;
+			flex: 1;
+			min-width: 0;
+			overflow: hidden;
+		}
+
+		.popoverItemName {
+			font-size: 13px;
+			font-weight: 600;
+			line-height: 1.2;
+			color: white;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.popoverItemContent {
+			font-size: 11px;
+			line-height: 1.3;
+			color: rgba(255, 255, 255, 0.55);
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		&:last-child {
+			margin-bottom: 0;
+		}
+
+		&:hover {
+			background: linear-gradient(
+				135deg,
+				rgba(var(--accent-rgb, 57, 182, 255), 0.28),
+				rgba(var(--accent-rgb, 57, 182, 255), 0.12)
+			);
+			transform: translateX(1px);
+		}
+
+		&:disabled {
+			opacity: 0.5;
+			cursor: not-allowed;
+		}
+
+		/* Cycle through the panel's gradient palette so adjacent tasks read as distinct. */
+		&:nth-child(5n + 1) {
+			--accent-rgb: 57, 182, 255;
+		}
+		&:nth-child(5n + 2) {
+			--accent-rgb: 189, 69, 251;
+		}
+		&:nth-child(5n + 3) {
+			--accent-rgb: 255, 159, 67;
+		}
+		&:nth-child(5n + 4) {
+			--accent-rgb: 255, 214, 0;
+		}
+		&:nth-child(5n + 5) {
+			--accent-rgb: 34, 197, 94;
+		}
+	}
+
+	.quickTasksPopoverEmpty {
+		padding: 16px;
+		text-align: center;
+		color: rgba(255, 255, 255, 0.45);
+		font-size: 12px;
 	}
 }
