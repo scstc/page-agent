@@ -40,3 +40,7 @@ package.json.bak
 .claude
 .cursor
 .gemini
+
+# Local debug / test artifacts (Playwright MCP traces, ad-hoc screenshots)
+.playwright-mcp/
+/*.png
