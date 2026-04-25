@@ -12,13 +12,17 @@ import {
 	// DEMO_API_KEY,
 	DEMO_BASE_URL,
 	DEMO_MODEL,
+	LOCAL_DEMO_URL,
 } from '../../constants'
 import { useLanguage } from '../../i18n/context'
 
+type CdnSource = 'international' | 'china' | 'local'
+
 let pageAgentModule: Promise<typeof import('page-agent')> | null = null
 
-function getInjection(useCN?: boolean) {
-	const cdn = useCN ? CDN_DEMO_CN_URL : CDN_DEMO_URL
+function getInjection(source: CdnSource) {
+	const cdn =
+		source === 'china' ? CDN_DEMO_CN_URL : source === 'local' ? LOCAL_DEMO_URL : CDN_DEMO_URL
 
 	const injection = encodeURI(
 		`javascript:(function(){var s=document.createElement('script');s.src=\`${cdn}?t=\${Math.random()}\`;s.setAttribute('crossorigin', true);s.type="text/javascript";s.onload=()=>console.log('PageAgent script loaded!');document.body.appendChild(s);})();`
@@ -55,7 +59,9 @@ export default function HeroSection() {
 	const isOther = params.has('try_other')
 
 	const [activeTab, setActiveTab] = useState<'try' | 'other'>(isOther ? 'other' : 'try')
-	const [cdnSource, setCdnSource] = useState<'international' | 'china'>('international')
+	const [cdnSource, setCdnSource] = useState<CdnSource>(
+		import.meta.env.DEV ? 'local' : 'international'
+	)
 
 	const [ready, setReady] = useState(false)
 	useEffect(() => {
@@ -291,17 +297,18 @@ export default function HeroSection() {
 													<div className="flex items-center justify-center gap-3">
 														<select
 															value={cdnSource}
-															onChange={(e) =>
-																setCdnSource(e.target.value as 'international' | 'china')
-															}
+															onChange={(e) => setCdnSource(e.target.value as CdnSource)}
 															className="px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-500 rounded bg-white dark:bg-gray-600 text-gray-700 dark:text-gray-200"
 														>
 															<option value="international">jsdelivr CDN</option>
 															<option value="china">npmmirror CDN</option>
+															{import.meta.env.DEV && (
+																<option value="local">localhost (dev)</option>
+															)}
 														</select>
 														<div
 															dangerouslySetInnerHTML={{
-																__html: getInjection(cdnSource === 'china'),
+																__html: getInjection(cdnSource),
 															}}
 														></div>
 													</div>
