@@ -453,6 +453,15 @@ export class Panel {
 						type="text"
 						class="${styles.taskInput}"
 						maxlength="${taskInputMaxLength}"
+						name="page-agent-task"
+						autocomplete="off"
+						autocapitalize="off"
+						autocorrect="off"
+						spellcheck="false"
+						inputmode="search"
+						data-form-type="other"
+						data-1p-ignore="true"
+						data-lpignore="true"
 					/>
 				</div>
 			</div>
@@ -481,15 +490,15 @@ export class Panel {
 				</div>
 				<label>
 					<span class="${styles.labelText}">${this.#i18n.t('ui.panel.settingsModel')}</span>
-					<input type="text" data-field="model" autocomplete="off" spellcheck="false" />
+					<input type="text" data-field="model" name="page-agent-llm-model" autocomplete="off" spellcheck="false" data-form-type="other" data-1p-ignore="true" data-lpignore="true" />
 				</label>
 				<label>
 					<span class="${styles.labelText}">${this.#i18n.t('ui.panel.settingsBaseURL')}</span>
-					<input type="text" data-field="baseURL" autocomplete="off" spellcheck="false" />
+					<input type="text" data-field="baseURL" name="page-agent-llm-baseurl" autocomplete="off" spellcheck="false" data-form-type="other" data-1p-ignore="true" data-lpignore="true" />
 				</label>
 				<label>
 					<span class="${styles.labelText}">${this.#i18n.t('ui.panel.settingsApiKey')}</span>
-					<input type="password" data-field="apiKey" autocomplete="off" spellcheck="false" />
+					<input type="password" data-field="apiKey" name="page-agent-llm-apikey" autocomplete="new-password" spellcheck="false" data-form-type="other" data-1p-ignore="true" data-lpignore="true" />
 				</label>
 				<p class="${styles.settingsHint}">${this.#i18n.t('ui.panel.settingsHint')}</p>
 				<p class="${styles.settingsError}" data-role="error" hidden></p>
