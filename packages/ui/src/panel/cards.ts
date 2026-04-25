@@ -1,7 +1,7 @@
 /**
  * Card HTML generation utilities for Panel
  */
-import { escapeHtml } from '../utils'
+import { escapeHtml, renderMarkdown } from '../utils'
 
 import styles from './Panel.module.css'
 
@@ -19,7 +19,9 @@ export function createCard({ icon, content, meta, type }: CardOptions): string {
 	const typeClass = type ? styles[type] : ''
 	const contentHtml = Array.isArray(content)
 		? `<div class="${styles.reflectionLines}">${content.map((line) => `<span>${escapeHtml(line)}</span>`).join('')}</div>`
-		: `<span>${escapeHtml(content)}</span>`
+		: type === 'output'
+			? `<div class="${styles.markdownBody}">${renderMarkdown(content)}</div>`
+			: `<span>${escapeHtml(content)}</span>`
 
 	return `
 		<div class="${styles.historyItem} ${typeClass}">

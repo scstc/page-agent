@@ -44,5 +44,9 @@
         "build": "vite build",
         "prepublishOnly": "node ../../scripts/pre-publish.js",
         "postpublish": "node ../../scripts/post-publish.js"
+    },
+    "dependencies": {
+        "dompurify": "^3.2.4",
+        "marked": "^15.0.7"
     }
 }
