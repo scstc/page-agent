@@ -46,9 +46,10 @@ tools.set(
 tools.set(
 	'wait',
 	tool({
-		description: 'Wait for x seconds. Can be used to wait until the page or data is fully loaded.',
+		description:
+			'Wait for x seconds. Use to wait until the page or data is fully loaded, or to insert a user-requested delay between actions (e.g. 30 seconds between clicks).',
 		inputSchema: z.object({
-			seconds: z.number().min(1).max(10).default(1),
+			seconds: z.number().min(1).max(3600).default(1),
 		}),
 		execute: async function (this: PageAgentCore, input) {
 			// try to subtract LLM calling time from the actual wait time
