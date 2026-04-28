@@ -55,6 +55,14 @@ export function modelPatch(body: Record<string, any>) {
 		}
 	}
 
+	if (modelName.startsWith('deepseek-v4')) {
+		debug('Applying DeepSeek V4 patch: disable thinking for tool-calling')
+		// V4 enables thinking by default; in thinking mode the API requires
+		// reasoning_content round-trips on tool-call turns or returns 400.
+		// Disable so the agent works with our OpenAI-format client.
+		body.thinking = { type: 'disabled' }
+	}
+
 	if (modelName.startsWith('grok')) {
 		debug('Applying Grok patch: removing tool_choice')
 		delete body.tool_choice
