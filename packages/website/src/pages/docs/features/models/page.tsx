@@ -26,7 +26,7 @@ const MODEL_GROUPS: Record<string, string[]> = {
 		'qwen-3-plus',
 	],
 	OpenAI: ['gpt-5.4', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini'],
-	DeepSeek: ['deepseek-3.2'],
+	DeepSeek: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-3.2'],
 	Google: ['gemini-3-pro', 'gemini-3-flash', 'gemini-2.5'],
 	Anthropic: [
 		'claude-opus-4.6',
@@ -124,6 +124,21 @@ const pageAgent = new PageAgent({
 });
 `}
 				/>
+				<p className="text-sm text-gray-600 dark:text-gray-400 mt-4 mb-2">{'DeepSeek (V4)'}</p>
+				<CodeEditor
+					code={`// DeepSeek V4 — OpenAI-compatible
+const pageAgent = new PageAgent({
+  baseURL: 'https://api.deepseek.com',
+  apiKey: 'your-api-key',
+  model: 'deepseek-v4-flash' // or 'deepseek-v4-pro'
+});
+`}
+				/>
+				<p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+					{isZh
+						? 'V4 默认开启思考模式（thinking）。PageAgent 会自动关闭以适配工具调用，无需手动配置。'
+						: 'V4 enables thinking mode by default. PageAgent auto-disables it to keep tool-calling responsive — no manual config needed.'}
+				</p>
 			</section>
 
 			<section className="mb-10">
