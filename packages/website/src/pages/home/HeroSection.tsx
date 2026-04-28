@@ -104,6 +104,13 @@ export default function HeroSection() {
 			})
 		}
 
+		// Inject the 🤖 scripted-flow shortcut to the left of the ⚡ quick-tasks
+		// button. Lazy-imported so the (~12 kB) flow code only loads on demand.
+		// Idempotent — safe to call again if the user re-runs without disposal.
+		import('page-agent/scripted-flow').then(({ injectScriptedFlowButton }) => {
+			injectScriptedFlowButton()
+		})
+
 		const result = await win.pageAgent.execute(task)
 		console.log(result)
 	}

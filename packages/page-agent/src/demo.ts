@@ -1,7 +1,19 @@
 /**
- * IIFE demo entry - auto-initializes with built-in demo API for testing
+ * IIFE demo entry - auto-initializes with built-in demo API for testing.
+ *
+ * Also bundles the scripted-flow API so console users can run e.g.
+ *   window.runScriptedFlow(window.scriptedFlowPresets.pddPromotion)
+ * and so the panel header shows a 🤖 button (left of the ⚡ quick-tasks button)
+ * that triggers the PDD scripted flow with a single click.
  */
 import { PageAgent, type PageAgentConfig } from './PageAgent'
+import {
+	injectScriptedFlowButton,
+	isScriptedFlowRunning,
+	pddPromotionPreset,
+	runScriptedFlow,
+	stopScriptedFlow,
+} from './scripted-flow'
 
 // Clean up existing instances to prevent multiple injections from bookmarklet
 if (window.pageAgent) {
@@ -10,6 +22,10 @@ if (window.pageAgent) {
 
 // Mount to global window object
 window.PageAgent = PageAgent
+window.runScriptedFlow = runScriptedFlow
+window.stopScriptedFlow = stopScriptedFlow
+window.isScriptedFlowRunning = isScriptedFlowRunning
+window.scriptedFlowPresets = { pddPromotion: pddPromotionPreset }
 
 console.log('🚀 page-agent.js loaded!')
 
@@ -45,4 +61,7 @@ setTimeout(() => {
 	window.pageAgent.panel.show()
 
 	console.log('🚀 page-agent.js initialized with config:', window.pageAgent.config)
+
+	// Inject the 🤖 button to the left of the ⚡ quick-tasks button.
+	injectScriptedFlowButton()
 })
