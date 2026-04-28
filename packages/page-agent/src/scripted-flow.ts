@@ -40,10 +40,25 @@ export interface ScriptedFlowConfig {
 	 * Confirm button inside the popup.
 	 * If `text` is given, we find a button whose visible text matches.
 	 * If `selector` is given, we use it directly (scoped to the popup root).
+	 *
+	 * `verify` is an optional DOM-based outcome check that runs AFTER the click:
+	 * the flow waits for either a success or failure toast to appear (whichever
+	 * comes first), and treats absence-within-timeout as failure. This is the
+	 * difference between "click was dispatched" and "server actually accepted".
 	 */
 	confirm: {
 		text?: string
 		selector?: string
+		verify?: {
+			/** Regex matching the success toast text (e.g. /暂停成功|开启成功/). */
+			success?: RegExp
+			/** Regex matching the failure toast text (e.g. /操作频繁|请稍后/). */
+			failure?: RegExp
+			/** Optional CSS selector to scope the toast scan. Default: common toast roots. */
+			scanSelector?: string
+			/** Max wait for a verdict, in ms. Default: 3000. */
+			timeoutMs?: number
+		}
 	}
 
 	/** Pagination "next page" button. */
@@ -65,6 +80,20 @@ export interface ScriptedFlowConfig {
 		afterRow?: number
 		/** Wait after clicking next-page, before scanning rows again. Default: 1500. */
 		afterPageChange?: number
+	}
+
+	/**
+	 * Retry policy for a row when its pause flow fails (e.g. PDD returned
+	 * "操作频繁，请稍后再尝试"). The array specifies the wait BEFORE each
+	 * retry attempt, in ms. Default: [1000, 2000, 4000] — i.e. up to 3 retries
+	 * with exponential backoff after the initial attempt (4 attempts total).
+	 *
+	 * Each attempt re-checks whether the row's switch is still closed; if a
+	 * prior attempt actually succeeded server-side (toggle now reads OPEN/OFF),
+	 * we treat the row as done and skip remaining retries.
+	 */
+	retry?: {
+		backoffMs?: number[]
 	}
 
 	/** Show the visual mask + animated cursor. Default: true. */
@@ -93,6 +122,7 @@ interface ResolvedConfig {
 		afterRow: number
 		afterPageChange: number
 	}
+	retry: { backoffMs: number[] }
 	enableMask: boolean
 	dryRun: boolean
 	maxPages: number
@@ -143,6 +173,9 @@ function resolveConfig(c: ScriptedFlowConfig): ResolvedConfig {
 			beforeConfirm: c.delays?.beforeConfirm ?? 28000,
 			afterRow: c.delays?.afterRow ?? 1000,
 			afterPageChange: c.delays?.afterPageChange ?? 1500,
+		},
+		retry: {
+			backoffMs: c.retry?.backoffMs ?? [1000, 2000, 4000],
 		},
 		enableMask: c.enableMask ?? true,
 		dryRun: c.dryRun ?? false,
@@ -266,6 +299,166 @@ function isVisible(el: Element): boolean {
 	return true
 }
 
+// Common toast / message component selectors (anq-ui mirrors antd, plus a few
+// generic fallbacks). Used to scope the verify-toast scan.
+const TOAST_CANDIDATE_SELECTOR = [
+	'[class*="anq-message"]',
+	'[class*="anq-notification"]',
+	'[class*="anq-toast"]',
+	'[class*="ant-message"]',
+	'[class*="ant-notification"]',
+	'[class*="MS-message"]',
+	'[class*="message-notice"]',
+	'[class*="notification-notice"]',
+	'[role="alert"]',
+	'[role="status"]',
+].join(',')
+
+/**
+ * Snapshot the set of toast-like elements whose text already matches either
+ * pattern. Used to ignore stale toasts that were on screen BEFORE we clicked
+ * the confirm button.
+ */
+function snapshotMatchingToasts(
+	verify: NonNullable<ScriptedFlowConfig['confirm']['verify']>
+): Set<HTMLElement> {
+	const stale = new Set<HTMLElement>()
+	const selector = verify.scanSelector ?? TOAST_CANDIDATE_SELECTOR
+	const candidates = document.querySelectorAll<HTMLElement>(selector)
+	for (const el of candidates) {
+		if (!isVisible(el)) continue
+		const text = (el.textContent || '').trim()
+		if (!text) continue
+		if (verify.success?.test(text)) stale.add(el)
+		if (verify.failure?.test(text)) stale.add(el)
+	}
+	return stale
+}
+
+interface VerifyResult {
+	ok: boolean
+	/** Toast text matched, or a synthetic message if the wait timed out. */
+	message: string
+}
+
+/**
+ * After clicking confirm, watch DOM for a NEW toast whose text matches either
+ * `verify.success` or `verify.failure`. Pre-existing matches in `stale` are
+ * ignored so we don't latch onto a leftover toast from the previous row.
+ *
+ * Failure ALWAYS beats success: if both kinds of toasts appear, we report
+ * failure. PDD has been observed to show "暂停成功" alongside "操作频繁"
+ * during rate-limit responses, so naively returning the first match is wrong.
+ *
+ * On a success match we wait a short grace window (`successGraceMs`) before
+ * committing, in case a failure toast is still arriving on a separate channel.
+ */
+function waitForToastResult(
+	verify: NonNullable<ScriptedFlowConfig['confirm']['verify']>,
+	stale: Set<HTMLElement>,
+	handle: AbortHandle
+): Promise<VerifyResult> {
+	const timeoutMs = verify.timeoutMs ?? 3000
+	const selector = verify.scanSelector ?? TOAST_CANDIDATE_SELECTOR
+	const successGraceMs = 600
+
+	return new Promise<VerifyResult>((resolve, reject) => {
+		let settled = false
+		let pendingSuccess: string | null = null
+		let observer: MutationObserver | null = null
+		let pollId: ReturnType<typeof setInterval> | null = null
+		let timeoutId: ReturnType<typeof setTimeout> | null = null
+		let successCommitId: ReturnType<typeof setTimeout> | null = null
+
+		const cleanup = (): void => {
+			if (observer) observer.disconnect()
+			if (pollId !== null) clearInterval(pollId)
+			if (timeoutId !== null) clearTimeout(timeoutId)
+			if (successCommitId !== null) clearTimeout(successCommitId)
+		}
+
+		const finishSuccess = (text: string): void => {
+			if (settled) return
+			settled = true
+			cleanup()
+			console.log(`[scripted-flow] toast verified — success: "${text}"`)
+			resolve({ ok: true, message: text })
+		}
+
+		const finishFailure = (text: string): void => {
+			if (settled) return
+			settled = true
+			cleanup()
+			console.log(`[scripted-flow] toast verified — failure: "${text}"`)
+			resolve({ ok: false, message: text })
+		}
+
+		const check = (): void => {
+			if (settled) return
+			if (handle.aborted) {
+				settled = true
+				cleanup()
+				reject(new AbortError())
+				return
+			}
+
+			// Two-pass scan: collect failure candidates first; if any present,
+			// fail immediately. Otherwise accept success match (after grace delay).
+			let failureMatch: string | null = null
+			let successMatch: string | null = null
+
+			const candidates = document.querySelectorAll<HTMLElement>(selector)
+			for (const el of candidates) {
+				if (stale.has(el)) continue
+				if (!isVisible(el)) continue
+				const text = (el.textContent || '').trim()
+				if (!text || text.length > 200) continue
+				if (verify.failure?.test(text)) {
+					failureMatch = text
+					break // failure wins outright
+				}
+				if (!successMatch && verify.success?.test(text)) {
+					successMatch = text
+				}
+			}
+
+			if (failureMatch) {
+				finishFailure(failureMatch)
+				return
+			}
+
+			if (successMatch && !pendingSuccess) {
+				pendingSuccess = successMatch
+				// Defer the success commit so a follow-up failure toast (rate-limit
+				// races where PDD shows both) still gets the chance to override.
+				successCommitId = setTimeout(() => {
+					if (pendingSuccess) finishSuccess(pendingSuccess)
+				}, successGraceMs)
+			}
+		}
+
+		observer = new MutationObserver(check)
+		observer.observe(document.body, {
+			childList: true,
+			subtree: true,
+			characterData: true,
+		})
+		pollId = setInterval(check, 200)
+		timeoutId = setTimeout(() => {
+			if (settled) return
+			settled = true
+			cleanup()
+			console.log(
+				`[scripted-flow] toast verify timed out after ${timeoutMs}ms — no matching toast seen`
+			)
+			resolve({ ok: false, message: `${timeoutMs}ms 内未检测到结果反馈 toast` })
+		}, timeoutMs)
+
+		// Initial check after a tick — gives the toast a moment to mount.
+		setTimeout(check, 50)
+	})
+}
+
 // ---------------------------------------------------------------------------
 // HUD overlay (top-left status panel)
 // ---------------------------------------------------------------------------
@@ -284,11 +477,19 @@ interface HUDContext {
 	rowsTotal: number
 }
 
+interface ErrorEntry {
+	page: number
+	row: number
+	message: string
+}
+
 class FlowHUD {
 	private el: HTMLDivElement
 	private titleEl: HTMLDivElement
 	private statusEl: HTMLDivElement
 	private statsEl: HTMLDivElement
+	private errorsEl: HTMLDivElement
+	private errors: ErrorEntry[] = []
 
 	constructor() {
 		this.el = document.createElement('div')
@@ -327,7 +528,13 @@ class FlowHUD {
 		this.statsEl.style.cssText =
 			'margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.1);font-size:11px;opacity:0.85'
 
-		this.el.append(this.titleEl, this.statusEl, this.statsEl)
+		// Errors section: hidden until at least one error is reported. Scrolls
+		// internally if many errors accumulate so the HUD never grows beyond ~50% viewport.
+		this.errorsEl = document.createElement('div')
+		this.errorsEl.style.cssText =
+			'display:none;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,80,80,0.25);max-height:38vh;overflow-y:auto;font-size:11px;line-height:1.4'
+
+		this.el.append(this.titleEl, this.statusEl, this.statsEl, this.errorsEl)
 		document.body.appendChild(this.el)
 	}
 
@@ -345,12 +552,64 @@ class FlowHUD {
 		this.statsEl.innerHTML = `✓ 已暂停 <b>${stats.rowsActioned}</b> &nbsp; ⏭ 已开/无开关 <b>${stats.rowsSkippedOpen + stats.rowsWithoutToggle}</b> &nbsp; ✗ 失败 <b>${stats.errors}</b>`
 	}
 
+	/**
+	 * Add or update the error entry for a given (page, row). Multiple attempts
+	 * on the same row replace the previous entry rather than stacking, so the
+	 * list stays compact and reflects the latest known failure state.
+	 */
+	addError(entry: ErrorEntry): void {
+		const idx = this.errors.findIndex((e) => e.page === entry.page && e.row === entry.row)
+		if (idx >= 0) {
+			this.errors[idx] = entry
+		} else {
+			this.errors.push(entry)
+		}
+		this.renderErrors()
+	}
+
+	/** Drop any error entries for the given (page, row), e.g. after a successful retry. */
+	removeErrorsForRow(page: number, row: number): void {
+		const before = this.errors.length
+		this.errors = this.errors.filter((e) => !(e.page === page && e.row === row))
+		if (this.errors.length !== before) this.renderErrors()
+	}
+
+	private renderErrors(): void {
+		if (this.errors.length === 0) {
+			this.errorsEl.style.display = 'none'
+			this.errorsEl.innerHTML = ''
+			return
+		}
+		this.errorsEl.style.display = 'block'
+		this.errorsEl.innerHTML = ''
+		this.errors.forEach((entry, i) => {
+			const line = document.createElement('div')
+			line.style.cssText = 'padding:4px 6px;border-radius:4px;color:#ffb4b4'
+			line.style.background = i % 2 === 0 ? 'rgba(255,80,80,0.12)' : 'rgba(255,80,80,0.06)'
+
+			const locator = document.createElement('span')
+			locator.style.cssText = 'color:#ff8a8a;font-weight:600;margin-right:6px'
+			locator.textContent = `P${entry.page}·R${entry.row + 1}`
+
+			const msg = document.createElement('span')
+			msg.style.cssText = 'color:#ffd4d4;word-break:break-word'
+			msg.textContent = entry.message
+
+			line.append(locator, msg)
+			this.errorsEl.appendChild(line)
+		})
+		// Keep the freshest entry visible.
+		this.errorsEl.scrollTop = this.errorsEl.scrollHeight
+	}
+
 	finish(message: string, stats: HUDStats): void {
 		this.titleEl.innerHTML =
 			'🤖 Scripted Flow &nbsp; <span style="opacity:0.55;font-weight:400">已结束</span>'
 		this.statusEl.innerHTML = message
 		this.statsEl.innerHTML = `✓ 已暂停 <b>${stats.rowsActioned}</b> &nbsp; ⏭ 已开/无开关 <b>${stats.rowsSkippedOpen + stats.rowsWithoutToggle}</b> &nbsp; ✗ 失败 <b>${stats.errors}</b>`
-		setTimeout(() => this.dispose(), 10_000)
+		// Keep the HUD visible longer when there are errors so the user can read them.
+		const lingerMs = this.errors.length > 0 ? 60_000 : 10_000
+		setTimeout(() => this.dispose(), lingerMs)
 	}
 
 	dispose(): void {
@@ -436,15 +695,91 @@ export async function runScriptedFlow(rawConfig: ScriptedFlowConfig): Promise<vo
 
 				log(`Row ${i}: toggle is CLOSED, executing pause flow`)
 
-				try {
-					await processClosedRow(row, toggle, config, handle, hud, ctx, stats)
+				const maxAttempts = config.retry.backoffMs.length + 1 // initial + retries
+				let lastError: Error | null = null
+				let succeeded = false
+
+				for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+					if (handle.aborted) throw new AbortError()
+
+					// Re-resolve the toggle each attempt because PDD may have replaced
+					// the DOM node after the previous attempt's click animations.
+					const liveToggle = row.querySelector<HTMLElement>(config.toggleSelector)
+					if (!liveToggle) {
+						lastError = new Error('Toggle disappeared from row between attempts')
+						break
+					}
+
+					// State semantics on PDD's promotion list:
+					//   CLOSED toggle = promotion is paused (this is what we filter for at row entry)
+					//   OPEN toggle   = promotion is running
+					// After a failed pause attempt the toggle stays OPEN (server rejected
+					// the close), so retries must adapt: skip the initial "open it first"
+					// preamble and go straight to the popup-triggering click.
+					const startedOpen = config.isOpen(liveToggle)
+					if (attempt === 1 && startedOpen) {
+						// First attempt but row started OPEN? — earlier scan must have raced
+						// with PDD changing state. Skip rather than risk side-effects.
+						log(`Row ${i}: toggle unexpectedly OPEN at first attempt, skipping`)
+						stats.rowsSkippedOpen++
+						hud?.update(ctx, '⏭ 跳过：开关已打开（首次扫描后状态变化）', stats)
+						break
+					}
+
+					if (attempt > 1) {
+						const waitMs = config.retry.backoffMs[attempt - 2]
+						const waitS = Math.round(waitMs / 1000)
+						hud?.update(
+							ctx,
+							`⏳ 第 ${attempt - 1}/${maxAttempts - 1} 次重试前等待 <b>${waitS}s</b>`,
+							stats
+						)
+						await abortableSleep(waitMs, handle)
+					}
+
+					// Skip the spec's countdown on retries — the popup countdown is
+					// only meant for the initial attempt; subsequent attempts rely on
+					// the wait-for-clickable check (5s) plus the retry backoff.
+					const skipCountdown = attempt > 1
+
+					try {
+						await pauseRow(
+							row,
+							liveToggle,
+							startedOpen,
+							skipCountdown,
+							config,
+							handle,
+							hud,
+							ctx,
+							stats
+						)
+						succeeded = true
+						lastError = null
+						break
+					} catch (err) {
+						if (err instanceof AbortError) throw err
+						lastError = err as Error
+						log(`Row ${i} attempt ${attempt}/${maxAttempts}: failed — ${lastError.message}`)
+						const attemptMessage = `[尝试 ${attempt}/${maxAttempts}] ${lastError.message}`
+						hud?.update(ctx, `❌ ${attemptMessage}`, stats)
+						// Surface the error in the HUD list immediately so long retry runs
+						// don't leave the user wondering. The list overwrites per-row, so a
+						// later successful retry will clean it up.
+						hud?.addError({ page: pageNum, row: i, message: attemptMessage })
+					}
+				}
+
+				if (succeeded) {
 					stats.rowsActioned++
 					hud?.update(ctx, '✅ 已暂停', stats)
-				} catch (err) {
-					if (err instanceof AbortError) throw err
-					log(`Row ${i}: failed — ${(err as Error).message}`)
+					// Successful retry — clear any provisional error rows we added.
+					hud?.removeErrorsForRow(pageNum, i)
+				} else if (lastError) {
 					stats.errors++
-					hud?.update(ctx, `❌ 失败：${(err as Error).message}`, stats)
+					const finalMessage = `[${maxAttempts} 次尝试均失败] ${lastError.message}`
+					hud?.update(ctx, `❌ 失败：${finalMessage}`, stats)
+					hud?.addError({ page: pageNum, row: i, message: finalMessage })
 				}
 
 				await abortableSleep(config.delays.afterRow, handle)
@@ -490,9 +825,11 @@ export async function runScriptedFlow(rawConfig: ScriptedFlowConfig): Promise<vo
 	}
 }
 
-async function processClosedRow(
+async function pauseRow(
 	row: HTMLElement,
 	toggle: HTMLElement,
+	startedOpen: boolean,
+	skipCountdown: boolean,
 	config: ResolvedConfig,
 	handle: AbortHandle,
 	hud: FlowHUD | null,
@@ -503,22 +840,38 @@ async function processClosedRow(
 
 	if (config.dryRun) {
 		log(
-			'[dryRun] would click toggle, wait, click again, wait popup, poll-until-ready, click confirm'
+			(startedOpen
+				? '[dryRun] retry-from-OPEN: would click once, wait popup, '
+				: '[dryRun] would click toggle, wait, click again, wait popup, ') +
+				(skipCountdown ? '[skip countdown] ' : 'countdown, ') +
+				'click confirm, verify'
 		)
 		return
 	}
 
-	hud?.update(ctx, '🖱 第 1 次点击开关', stats)
-	await clickElement(toggle)
+	let liveToggle = toggle
 
-	hud?.update(ctx, '⏳ 等待 1 秒', stats)
-	await abortableSleep(config.delays.betweenToggleClicks, handle)
-	if (handle.aborted) throw new AbortError()
+	// CLOSED start: do the spec's "click ON, wait 1s" preamble before triggering popup.
+	// OPEN start (a retry path after rate-limit rejection): the row is already in OPEN
+	// state, so a single click directly triggers the pause popup.
+	if (!startedOpen) {
+		hud?.update(ctx, '🖱 第 1 次点击开关', stats)
+		await clickElement(liveToggle)
 
-	const refreshed = row.querySelector<HTMLElement>(config.toggleSelector)
-	const toggleAgain = refreshed && refreshed.isConnected ? refreshed : toggle
-	hud?.update(ctx, '🖱 第 2 次点击开关', stats)
-	await clickElement(toggleAgain)
+		hud?.update(ctx, '⏳ 等待 1 秒', stats)
+		await abortableSleep(config.delays.betweenToggleClicks, handle)
+		if (handle.aborted) throw new AbortError()
+
+		const refreshed = row.querySelector<HTMLElement>(config.toggleSelector)
+		if (refreshed && refreshed.isConnected) liveToggle = refreshed
+	} else {
+		log('Row is OPEN — skipping initial activation step (retry from previous failure)')
+	}
+
+	// Click that triggers the Popconfirm. From CLOSED-start this is the 2nd click;
+	// from OPEN-start (retry) this is the only click.
+	hud?.update(ctx, startedOpen ? '🖱 点击开关触发弹窗' : '🖱 第 2 次点击开关', stats)
+	await clickElement(liveToggle)
 
 	hud?.update(ctx, '⏳ 等待弹窗出现', stats)
 	const popup = await waitFor<HTMLElement>(
@@ -532,7 +885,11 @@ async function processClosedRow(
 	)
 	log('Popup appeared')
 
-	await sleepWithCountdown(config.delays.beforeConfirm, '倒计时', popup, hud, ctx, stats, handle)
+	if (!skipCountdown) {
+		await sleepWithCountdown(config.delays.beforeConfirm, '倒计时', popup, hud, ctx, stats, handle)
+	} else {
+		log('Retry attempt — skipping the popup countdown wait')
+	}
 
 	hud?.update(ctx, '⏳ 等待按钮就绪…', stats)
 	const confirmBtn = await waitFor<HTMLElement>(
@@ -545,8 +902,22 @@ async function processClosedRow(
 	)
 	log('Confirm button ready, clicking')
 
+	// Snapshot any pre-existing matching toasts BEFORE the click so we don't
+	// latch onto leftover messages from the previous row.
+	const verify = config.confirm.verify
+	const stale = verify ? snapshotMatchingToasts(verify) : null
+
 	hud?.update(ctx, '🖱 点击「确定暂停」', stats)
 	await clickElement(confirmBtn)
+
+	if (verify && stale) {
+		hud?.update(ctx, '⏳ 等待结果反馈…', stats)
+		const result = await waitForToastResult(verify, stale, handle)
+		if (!result.ok) {
+			throw new Error(result.message)
+		}
+		log(`Confirm verified: ${result.message}`)
+	}
 }
 
 async function sleepWithCountdown(
@@ -601,6 +972,21 @@ export const pddPromotionPreset: ScriptedFlowConfig = {
 	},
 	confirm: {
 		text: '确定暂停',
+		// PDD shows an `.anq-message` toast after the action lands on the server:
+		//   - "暂停成功" / "开启成功" → success
+		//   - "操作频繁，请稍后再尝试" / "失败" / etc. → real failure
+		// Without this check, a rejected request would still look like success
+		// because clickElement never throws on its own.
+		verify: {
+			success: /(暂停|开启|操作)成功/,
+			// Broad failure pattern — anything PDD/anq-ui has shown for rejected actions.
+			// `频率` / `太快` / `请勿` / `请重试` cover the common rate-limit phrasings;
+			// `失败` / `错误` / `异常` / `不能` catch generic errors. We DON'T match
+			// just `频繁` because the popup body itself contains "频繁启停可能..."
+			// (would cause false positives). `操作频繁` is the actual toast wording.
+			failure: /操作频繁|请稍后|请重试|请勿|频率|限流|太快|失败|错误|异常|不能|未能|无法|拒绝/,
+			timeoutMs: 3000,
+		},
 	},
 	nextPage: {
 		selector: '.anq-pagination-next',
