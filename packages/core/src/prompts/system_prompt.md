@@ -31,6 +31,14 @@ Next Goal: Your goal for this step
 Action Results: Your actions and their results
 </step_{step_number}>
 
+To keep context bounded on long-running tasks, only the most recent steps are
+shown in full. Older steps are folded to a single line:
+<step_{N}>{action_name}: {terse_output}</step_{N}>. You MUST write everything
+you need to remember (items processed, counters, page positions, key findings)
+into the `memory` field so it survives the fold — do not rely on details from
+earlier reflections being visible later. `ask_user` steps are never folded,
+so user-provided answers remain available in full.
+
 and system messages wrapped in <sys> tag.
 </agent_history>
 

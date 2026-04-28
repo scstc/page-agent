@@ -29,6 +29,14 @@ export type * from './types'
 export type PageAgentCoreConfig = AgentConfig & { pageController: PageController }
 
 /**
+ * Number of most-recent step events kept verbatim in <agent_history>.
+ * Earlier steps are folded into a single line to keep request payloads
+ * bounded over long-running loop tasks. `ask_user` steps are exempt
+ * (their output carries verbatim user answers).
+ */
+const HISTORY_WINDOW_SIZE = 5
+
+/**
  * AI agent for browser automation.
  *
  * @remarks
@@ -116,7 +124,7 @@ export class PageAgentCore extends EventTarget {
 	constructor(config: PageAgentCoreConfig) {
 		super()
 
-		this.config = { ...config, maxSteps: config.maxSteps ?? 40 }
+		this.config = { ...config, maxSteps: config.maxSteps ?? 1000 }
 
 		this.#llm = new LLM(this.config)
 		this.tools = new Map(tools)
@@ -783,23 +791,51 @@ export class PageAgentCore extends EventTarget {
 
 		prompt += '<agent_history>\n'
 
+		// Find the cutoff index: any history entry before this index gets
+		// folded. The cutoff is the position of the (window+1)-th most recent
+		// step event; if there are fewer steps than the window, nothing folds.
+		const stepIndices: number[] = []
+		for (let i = 0; i < this.history.length; i++) {
+			if (this.history[i].type === 'step') stepIndices.push(i)
+		}
+		const cutoffIdx =
+			stepIndices.length > HISTORY_WINDOW_SIZE
+				? stepIndices[stepIndices.length - HISTORY_WINDOW_SIZE]
+				: 0
+
 		let stepIndex = 0
-		for (const event of this.history) {
+		for (let i = 0; i < this.history.length; i++) {
+			const event = this.history[i]
 			if (event.type === 'step') {
 				stepIndex++
-				prompt += `<step_${stepIndex}>\n`
-				prompt += `Evaluation of Previous Step: ${event.reflection.evaluation_previous_goal}\n`
-				prompt += `Memory: ${event.reflection.memory}\n`
-				prompt += `Next Goal: ${event.reflection.next_goal}\n`
-				prompt += `Action Results: ${event.action.output}\n`
-				prompt += `</step_${stepIndex}>\n`
+				// `ask_user` is exempt from folding — its action.output carries
+				// verbatim user answers that the task may reference arbitrarily
+				// far in the future. Folding would silently truncate them.
+				const isFoldable = i < cutoffIdx && event.action.name !== 'ask_user'
+				if (isFoldable) {
+					const terseOutput = event.action.output.split('\n')[0].slice(0, 80)
+					prompt += `<step_${stepIndex}>${event.action.name}: ${terseOutput}</step_${stepIndex}>\n`
+				} else {
+					prompt += `<step_${stepIndex}>\n`
+					prompt += `Evaluation of Previous Step: ${event.reflection.evaluation_previous_goal}\n`
+					prompt += `Memory: ${event.reflection.memory}\n`
+					prompt += `Next Goal: ${event.reflection.next_goal}\n`
+					prompt += `Action Results: ${event.action.output}\n`
+					prompt += `</step_${stepIndex}>\n`
+				}
 			} else if (event.type === 'observation') {
-				prompt += `<sys>${event.content}</sys>\n`
+				// Observations (URL changes, wait warnings) are transient and
+				// already reflected in surrounding action outputs once the
+				// fold window has moved past them.
+				if (i >= cutoffIdx) {
+					prompt += `<sys>${event.content}</sys>\n`
+				}
 			} else if (event.type === 'user_takeover') {
+				// Always rendered, even across folds: the agent must remain
+				// aware the user intervened, regardless of how long ago.
 				prompt += `<sys>User took over control and made changes to the page</sys>\n`
-			} else if (event.type === 'error') {
-				// Error events are mainly for panel rendering, not included in LLM context
-				// to avoid polluting the agent's reasoning with transient errors
+			} else if (event.type === 'error' || event.type === 'retry') {
+				// Not rendered into LLM context — UI-only events.
 			}
 		}
 
