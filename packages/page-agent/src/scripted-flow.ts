@@ -61,10 +61,29 @@ export interface ScriptedFlowConfig {
 		}
 	}
 
-	/** Pagination "next page" button. */
+	/** Pagination "next page" button (used at the END of each page to advance). */
 	nextPage: {
 		selector: string
 		isDisabled?: (button: HTMLElement) => boolean
+	}
+
+	/**
+	 * Direct page-number navigation (used when `startPage > 1` to jump there
+	 * absolutely instead of clicking next-page N−1 times).
+	 *
+	 * Defaults target PDD's antd-style `.anq-pagination` markup:
+	 *   <li class="anq-pagination-item anq-pagination-item-N" title="N"><a>N</a></li>
+	 * with the active page carrying `.anq-pagination-item-active`.
+	 */
+	pagination?: {
+		/** Selector for the pagination container. Default: `.anq-pagination`. */
+		containerSelector?: string
+		/** Locate the clickable element for page N within the container. */
+		findPageButton?: (n: number, container: HTMLElement) => HTMLElement | null
+		/** List the page numbers currently visible (i.e. not collapsed in "..."). */
+		listVisiblePages?: (container: HTMLElement) => number[]
+		/** Read the currently-highlighted page number, or null if undetectable. */
+		getCurrentPage?: (container: HTMLElement) => number | null
 	}
 
 	delays?: {
@@ -105,6 +124,24 @@ export interface ScriptedFlowConfig {
 	/** Cap the number of pages to process. Default: 200 (safety limit). */
 	maxPages?: number
 
+	/**
+	 * Resume position: start from this page (1-based). The runner clicks
+	 * next-page `(startPage − 1)` times before scanning rows; the first
+	 * page-loop iteration uses `startPage` as its `pageNum`. Default: 1.
+	 *
+	 * Note: this is RELATIVE to the page the user is on when the flow starts —
+	 * the runner does not read PDD's actual page indicator. Set startPage = 5
+	 * to mean "advance 4 pages from current position".
+	 */
+	startPage?: number
+
+	/**
+	 * Resume position: on the start page only, skip the first
+	 * `(startRow − 1)` rows. Subsequent pages are scanned from row 1.
+	 * Default: 1.
+	 */
+	startRow?: number
+
 	/** Optional logger. Default: console.log with a [scripted-flow] prefix. */
 	log?: (message: string, ...rest: unknown[]) => void
 }
@@ -116,6 +153,12 @@ interface ResolvedConfig {
 	popup: { selector: string; timeoutMs: number }
 	confirm: ScriptedFlowConfig['confirm']
 	nextPage: { selector: string; isDisabled: (button: HTMLElement) => boolean }
+	pagination: {
+		containerSelector: string
+		findPageButton: (n: number, container: HTMLElement) => HTMLElement | null
+		listVisiblePages: (container: HTMLElement) => number[]
+		getCurrentPage: (container: HTMLElement) => number | null
+	}
 	delays: {
 		betweenToggleClicks: number
 		beforeConfirm: number
@@ -126,6 +169,8 @@ interface ResolvedConfig {
 	enableMask: boolean
 	dryRun: boolean
 	maxPages: number
+	startPage: number
+	startRow: number
 	log: (message: string, ...rest: unknown[]) => void
 }
 
@@ -154,6 +199,58 @@ const defaultIsDisabled = (button: HTMLElement): boolean => {
 	return false
 }
 
+// ---------------------------------------------------------------------------
+// Pagination defaults — tuned to PDD's antd-style `.anq-pagination`. The page
+// items are `<li class="anq-pagination-item anq-pagination-item-N" title="N">`,
+// the active one carries `.anq-pagination-item-active`. Selectors are
+// overridable per-preset.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PAGINATION_CONTAINER = '.anq-pagination'
+
+const defaultFindPageButton = (n: number, container: HTMLElement): HTMLElement | null => {
+	const byTitle = container.querySelector<HTMLElement>(`li.anq-pagination-item[title="${n}"]`)
+	if (byTitle) return byTitle
+	const byClass = container.querySelector<HTMLElement>(`li.anq-pagination-item-${n}`)
+	if (byClass) return byClass
+	// Generic fallback: any <li>/<a>/<button> in the container whose visible text equals N.
+	const candidates = Array.from(container.querySelectorAll<HTMLElement>('li, a, button')).filter(
+		(el) => el.textContent?.trim() === String(n) && isVisible(el)
+	)
+	return candidates[0] ?? null
+}
+
+const defaultListVisiblePages = (container: HTMLElement): number[] => {
+	const items = Array.from(container.querySelectorAll<HTMLElement>('li.anq-pagination-item'))
+	const fromItems = items
+		.map((el) => parseInt(el.getAttribute('title') ?? '', 10))
+		.filter((n) => Number.isFinite(n) && n >= 1)
+	if (fromItems.length) return [...new Set(fromItems)].sort((a, b) => a - b)
+	// Generic fallback.
+	const numeric = Array.from(container.querySelectorAll<HTMLElement>('li, a, button'))
+		.map((el) => /^(\d+)$/.exec(el.textContent?.trim() ?? '')?.[1])
+		.filter((s): s is string => !!s)
+		.map((s) => parseInt(s, 10))
+		.filter((n) => Number.isFinite(n) && n >= 1)
+	return [...new Set(numeric)].sort((a, b) => a - b)
+}
+
+const defaultGetCurrentPage = (container: HTMLElement): number | null => {
+	const active = container.querySelector<HTMLElement>('.anq-pagination-item-active')
+	if (active) {
+		const fromTitle = parseInt(active.getAttribute('title') ?? '', 10)
+		if (Number.isFinite(fromTitle) && fromTitle >= 1) return fromTitle
+		const fromText = parseInt(active.textContent?.trim() ?? '', 10)
+		if (Number.isFinite(fromText) && fromText >= 1) return fromText
+	}
+	const ariaCurrent = container.querySelector<HTMLElement>('[aria-current="page"]')
+	if (ariaCurrent) {
+		const n = parseInt(ariaCurrent.textContent?.trim() ?? '', 10)
+		if (Number.isFinite(n) && n >= 1) return n
+	}
+	return null
+}
+
 function resolveConfig(c: ScriptedFlowConfig): ResolvedConfig {
 	return {
 		rowSelector: c.rowSelector,
@@ -168,6 +265,12 @@ function resolveConfig(c: ScriptedFlowConfig): ResolvedConfig {
 			selector: c.nextPage.selector,
 			isDisabled: c.nextPage.isDisabled ?? defaultIsDisabled,
 		},
+		pagination: {
+			containerSelector: c.pagination?.containerSelector ?? DEFAULT_PAGINATION_CONTAINER,
+			findPageButton: c.pagination?.findPageButton ?? defaultFindPageButton,
+			listVisiblePages: c.pagination?.listVisiblePages ?? defaultListVisiblePages,
+			getCurrentPage: c.pagination?.getCurrentPage ?? defaultGetCurrentPage,
+		},
 		delays: {
 			betweenToggleClicks: c.delays?.betweenToggleClicks ?? 1000,
 			beforeConfirm: c.delays?.beforeConfirm ?? 28000,
@@ -180,6 +283,8 @@ function resolveConfig(c: ScriptedFlowConfig): ResolvedConfig {
 		enableMask: c.enableMask ?? true,
 		dryRun: c.dryRun ?? false,
 		maxPages: c.maxPages ?? 200,
+		startPage: Math.max(1, Math.floor(c.startPage ?? 1)),
+		startRow: Math.max(1, Math.floor(c.startRow ?? 1)),
 		log: c.log ?? ((msg, ...rest) => console.log(`[scripted-flow] ${msg}`, ...rest)),
 	}
 }
@@ -194,6 +299,20 @@ class AbortError extends Error {
 	constructor() {
 		super('Scripted flow aborted')
 		this.name = 'AbortError'
+	}
+}
+
+class RetryExhaustedError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = 'RetryExhaustedError'
+	}
+}
+
+class LocationNotFoundError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = 'LocationNotFoundError'
 	}
 }
 
@@ -658,7 +777,40 @@ export async function runScriptedFlow(rawConfig: ScriptedFlowConfig): Promise<vo
 		log('Starting scripted flow', config)
 		hud?.update(ctx, '🚀 启动中…', stats)
 
-		for (let pageNum = 1; pageNum <= config.maxPages; pageNum++) {
+		// Resume-position: jump directly to startPage by clicking its page-number
+		// button in the pagination bar. This is ABSOLUTE — startPage = 6 means
+		// PDD's actual page 6, regardless of where the user currently is.
+		// Limitation: the target page must be visible in the pagination strip.
+		// If PDD has collapsed it inside "...", the user must first click the
+		// adjacent ellipsis or a neighbor page so the target becomes visible.
+		if (config.startPage > 1) {
+			if (handle.aborted) throw new AbortError()
+			const container = document.querySelector<HTMLElement>(config.pagination.containerSelector)
+			if (!container) {
+				throw new LocationNotFoundError(`找不到分页容器 (${config.pagination.containerSelector})`)
+			}
+			const current = config.pagination.getCurrentPage(container)
+			if (current !== config.startPage) {
+				const btn = config.pagination.findPageButton(config.startPage, container)
+				if (!btn) {
+					throw new LocationNotFoundError(
+						`第 ${config.startPage} 页不在当前分页条可见范围内（请先点 … 或相邻页码让它出现）`
+					)
+				}
+				hud?.update(ctx, `⏭ 跳到第 ${config.startPage} 页`, stats)
+				log(`Navigating to startPage ${config.startPage} via pagination button`)
+				if (config.dryRun) {
+					log(`[dryRun] would click page button ${config.startPage}`)
+				} else {
+					await clickElement(btn)
+					await abortableSleep(config.delays.afterPageChange, handle)
+				}
+			} else {
+				log(`Already on startPage ${config.startPage}, skipping navigation`)
+			}
+		}
+
+		for (let pageNum = config.startPage; pageNum <= config.maxPages; pageNum++) {
 			if (handle.aborted) throw new AbortError()
 			ctx.page = pageNum
 			ctx.row = -1
@@ -672,7 +824,17 @@ export async function runScriptedFlow(rawConfig: ScriptedFlowConfig): Promise<vo
 			hud?.update(ctx, `📋 扫描到 ${rows.length} 行`, stats)
 			stats.pagesProcessed++
 
-			for (let i = 0; i < rows.length; i++) {
+			// Resume-position: skip the first (startRow − 1) rows on the start page
+			// only. If the configured row doesn't exist on the page, abort — the
+			// user pointed somewhere that isn't actually there.
+			const rowStartIdx = pageNum === config.startPage ? config.startRow - 1 : 0
+			if (pageNum === config.startPage && config.startRow > rows.length) {
+				throw new LocationNotFoundError(
+					`第 ${config.startPage} 页只有 ${rows.length} 行，找不到第 ${config.startRow} 行`
+				)
+			}
+
+			for (let i = rowStartIdx; i < rows.length; i++) {
 				if (handle.aborted) throw new AbortError()
 				const row = rows[i]
 				ctx.row = i
@@ -780,6 +942,9 @@ export async function runScriptedFlow(rawConfig: ScriptedFlowConfig): Promise<vo
 					const finalMessage = `[${maxAttempts} 次尝试均失败] ${lastError.message}`
 					hud?.update(ctx, `❌ 失败：${finalMessage}`, stats)
 					hud?.addError({ page: pageNum, row: i, message: finalMessage })
+					// Halt the entire flow — the user explicitly does not want to keep
+					// pressing on after exhausting retries on a single row.
+					throw new RetryExhaustedError(`第 ${pageNum} 页第 ${i + 1} 行：${finalMessage}`)
 				}
 
 				await abortableSleep(config.delays.afterRow, handle)
@@ -813,6 +978,12 @@ export async function runScriptedFlow(rawConfig: ScriptedFlowConfig): Promise<vo
 		if (err instanceof AbortError) {
 			log('Scripted flow aborted by user', stats)
 			hud?.finish('🛑 已停止', stats)
+		} else if (err instanceof RetryExhaustedError) {
+			log(`Scripted flow halted after retry exhaustion: ${err.message}`, stats)
+			hud?.finish(`🛑 重试均失败，已中止流程：${err.message}`, stats)
+		} else if (err instanceof LocationNotFoundError) {
+			log(`Scripted flow halted: location not found — ${err.message}`, stats)
+			hud?.finish(`🛑 找不到指定位置：${err.message}`, stats)
 		} else {
 			log(`Scripted flow errored: ${(err as Error).message}`, stats)
 			hud?.finish(`💥 出错：${(err as Error).message}`, stats)
@@ -1156,7 +1327,6 @@ function openScriptedFlowPopover(
 		maxHeight: '320px',
 		overflowY: 'auto',
 		minWidth: '280px',
-		maxWidth: '420px',
 		background: 'rgba(2, 0, 20, 0.85)',
 		backdropFilter: 'blur(12px)',
 		border: '2px solid rgba(255, 255, 255, 0.4)',
@@ -1193,7 +1363,7 @@ function openScriptedFlowPopover(
 	const panelRect = panel?.getBoundingClientRect() ?? null
 
 	const popWidth = panelRect
-		? Math.max(260, Math.min(480, panelRect.width - 40))
+		? Math.max(260, panelRect.width - 8)
 		: Math.max(280, Math.min(420, 360))
 	pop.style.width = `${popWidth}px`
 
@@ -1260,6 +1430,58 @@ function setStoredCountdownSec(item: ScriptedFlowItem, sec: number): void {
 		localStorage.setItem(COUNTDOWN_STORAGE_PREFIX + item.name, String(sec))
 	} catch {
 		// ignore
+	}
+}
+
+const START_PAGE_STORAGE_PREFIX = 'page-agent:scripted-flow:start-page:'
+const START_ROW_STORAGE_PREFIX = 'page-agent:scripted-flow:start-row:'
+
+function getStoredPositiveInt(key: string, fallback: number): number {
+	try {
+		const raw = localStorage.getItem(key)
+		if (raw !== null) {
+			const n = parseInt(raw, 10)
+			if (Number.isFinite(n) && n >= 1) return n
+		}
+	} catch {
+		// localStorage may be disabled
+	}
+	return fallback
+}
+
+function setStoredPositiveInt(key: string, n: number): void {
+	try {
+		localStorage.setItem(key, String(Math.max(1, Math.floor(n))))
+	} catch {
+		// ignore
+	}
+}
+
+/**
+ * Sniff the PDD-style `.anq-pagination` strip so the popover can populate the
+ * start-page dropdown with the page numbers actually visible (not collapsed in
+ * "..."), and the start-row dropdown with the configured per-page count.
+ *
+ * Returns null when the container isn't found (e.g. user opened the bookmarklet
+ * on a non-list page) — caller falls back to free integer input.
+ */
+function detectPaginationInfo(): {
+	visiblePages: number[]
+	currentPage: number | null
+	perPage: number | null
+} | null {
+	const container = document.querySelector<HTMLElement>(DEFAULT_PAGINATION_CONTAINER)
+	if (!container) return null
+	const visiblePages = defaultListVisiblePages(container)
+	if (!visiblePages.length) return null
+	const currentPage = defaultGetCurrentPage(container)
+	// "每页 X 条" lives inside the same .anq-pagination ul on PDD.
+	const perMatch = /每页\s*(\d+)\s*条/.exec(container.textContent ?? '')
+	const perPage = perMatch ? parseInt(perMatch[1], 10) : null
+	return {
+		visiblePages,
+		currentPage,
+		perPage: perPage && Number.isFinite(perPage) && perPage > 0 ? perPage : null,
 	}
 }
 
@@ -1331,25 +1553,162 @@ function buildPopoverItem(
 	itemEl.appendChild(body)
 	itemEl.title = item.description
 
-	// Right-side editable countdown: shown only when the preset has a
-	// `beforeConfirm` delay (i.e. the flow has a real countdown step).
+	// Right-side compact controls: start page / start row / countdown.
+	// Page + row are constrained to detected PDD pagination when present
+	// ("共 X 条 每页 Y 条" parsed at popover open); otherwise free integer input.
+	// Countdown stays as before — shown only when the preset has a real countdown step.
+	const isZh = isZhLanguage()
+	const paging = detectPaginationInfo()
 	const hasCountdown = (item.preset.delays?.beforeConfirm ?? 0) > 0
+	const stopBubble = (e: Event): void => e.stopPropagation()
+	const enterLaunches = (e: KeyboardEvent): void => {
+		e.stopPropagation()
+		if (e.key === 'Enter') itemEl.click()
+	}
+	const inputBaseStyle: Record<string, string> = {
+		padding: '2px 4px',
+		background: 'rgba(0,0,0,0.25)',
+		color: 'white',
+		border: '1px solid rgba(255,255,255,0.18)',
+		borderRadius: '4px',
+		fontFamily: 'inherit',
+		fontSize: '12px',
+		outline: 'none',
+	}
+	const subUnitStyle: Record<string, string> = {
+		display: 'inline-flex',
+		alignItems: 'center',
+		gap: '4px',
+		flexShrink: '0',
+		padding: '4px 8px',
+		background: 'rgba(255,255,255,0.08)',
+		borderRadius: '6px',
+		border: '1px solid rgba(255,255,255,0.1)',
+	}
+	const labelStyle: Record<string, string> = {
+		fontSize: '11px',
+		color: 'rgba(255,255,255,0.55)',
+		fontFamily: 'inherit',
+	}
+
+	const buildSubUnit = (
+		prefix: string,
+		control: HTMLElement,
+		suffix: string,
+		title: string
+	): HTMLElement => {
+		const box = document.createElement('span')
+		Object.assign(box.style, subUnitStyle)
+		box.title = title
+		if (prefix) {
+			const p = document.createElement('span')
+			p.textContent = prefix
+			Object.assign(p.style, labelStyle)
+			box.appendChild(p)
+		}
+		box.appendChild(control)
+		if (suffix) {
+			const s = document.createElement('span')
+			s.textContent = suffix
+			Object.assign(s.style, labelStyle)
+			box.appendChild(s)
+		}
+		return box
+	}
+
+	const makeRangeControl = (
+		storageKey: string,
+		validValues: number[] | null,
+		fallbackValue: number
+	): { element: HTMLElement; getValue: () => number } => {
+		const stored = getStoredPositiveInt(storageKey, fallbackValue)
+		if (validValues && validValues.length > 0) {
+			const select = document.createElement('select')
+			Object.assign(select.style, { ...inputBaseStyle, minWidth: '46px' })
+			for (const v of validValues) {
+				const opt = document.createElement('option')
+				opt.value = String(v)
+				opt.textContent = String(v)
+				select.appendChild(opt)
+			}
+			const initial = validValues.includes(stored)
+				? stored
+				: validValues.includes(fallbackValue)
+					? fallbackValue
+					: validValues[0]
+			select.value = String(initial)
+			select.addEventListener('click', stopBubble)
+			select.addEventListener('mousedown', stopBubble)
+			select.addEventListener('keydown', stopBubble)
+			select.addEventListener('change', () => {
+				const n = parseInt(select.value, 10) || fallbackValue
+				setStoredPositiveInt(storageKey, n)
+			})
+			return {
+				element: select,
+				getValue: () => parseInt(select.value, 10) || fallbackValue,
+			}
+		}
+		const input = document.createElement('input')
+		input.type = 'number'
+		input.min = '1'
+		input.step = '1'
+		input.value = String(Math.max(1, stored))
+		Object.assign(input.style, {
+			...inputBaseStyle,
+			width: '44px',
+			textAlign: 'right',
+			fontFamily: 'ui-monospace, "SF Mono", "Menlo", "Cascadia Mono", "Consolas", monospace',
+		})
+		input.addEventListener('click', stopBubble)
+		input.addEventListener('mousedown', stopBubble)
+		input.addEventListener('keydown', enterLaunches)
+		input.addEventListener('change', () => {
+			const n = Math.max(1, parseInt(input.value, 10) || 1)
+			input.value = String(n)
+			setStoredPositiveInt(storageKey, n)
+		})
+		return { element: input, getValue: () => Math.max(1, parseInt(input.value, 10) || 1) }
+	}
+
+	const right = document.createElement('span')
+	Object.assign(right.style, {
+		display: 'inline-flex',
+		alignItems: 'center',
+		gap: '6px',
+		flexShrink: '0',
+	})
+
+	const rowValues = paging?.perPage ? Array.from({ length: paging.perPage }, (_, i) => i + 1) : null
+	const pageDefault = paging?.currentPage ?? 1
+	const pageCtrl = makeRangeControl(
+		START_PAGE_STORAGE_PREFIX + item.name,
+		paging?.visiblePages ?? null,
+		pageDefault
+	)
+	const rowCtrl = makeRangeControl(START_ROW_STORAGE_PREFIX + item.name, rowValues, 1)
+
+	const pageTooltip = (() => {
+		if (!paging) return isZh ? '起始页（未检测到分页）' : 'Start page (no pagination detected)'
+		const list = paging.visiblePages.join(', ')
+		const cur = paging.currentPage != null ? `当前 ${paging.currentPage}, ` : ''
+		return isZh
+			? `起始页（${cur}可选 ${list}；其他页请先在分页条点出来）`
+			: `Start page (${paging.currentPage != null ? `now ${paging.currentPage}, ` : ''}options: ${list})`
+	})()
+	const rowTooltip = paging?.perPage
+		? isZh
+			? `起始行 (1 – ${paging.perPage})`
+			: `Start row (1 – ${paging.perPage})`
+		: isZh
+			? '起始行（未检测到每页行数）'
+			: 'Start row (per-page count not detected)'
+
+	right.appendChild(buildSubUnit(isZh ? '页' : 'P', pageCtrl.element, '', pageTooltip))
+	right.appendChild(buildSubUnit(isZh ? '行' : 'R', rowCtrl.element, '', rowTooltip))
+
 	let countdownInput: HTMLInputElement | null = null
 	if (hasCountdown) {
-		const isZh = isZhLanguage()
-		const right = document.createElement('span')
-		Object.assign(right.style, {
-			display: 'inline-flex',
-			alignItems: 'center',
-			gap: '4px',
-			flexShrink: '0',
-			padding: '4px 8px',
-			background: 'rgba(255,255,255,0.08)',
-			borderRadius: '6px',
-			border: '1px solid rgba(255,255,255,0.1)',
-		})
-		right.title = isZh ? '点击编辑倒计时秒数' : 'Click to edit countdown seconds'
-
 		countdownInput = document.createElement('input')
 		countdownInput.type = 'number'
 		countdownInput.min = '0'
@@ -1357,43 +1716,30 @@ function buildPopoverItem(
 		countdownInput.step = '1'
 		countdownInput.value = String(getStoredCountdownSec(item))
 		Object.assign(countdownInput.style, {
-			width: '52px',
-			padding: '2px 4px',
-			background: 'rgba(0,0,0,0.25)',
-			color: 'white',
-			border: '1px solid rgba(255,255,255,0.18)',
-			borderRadius: '4px',
-			fontFamily: 'ui-monospace, "SF Mono", "Menlo", "Cascadia Mono", "Consolas", monospace',
-			fontSize: '12px',
+			...inputBaseStyle,
+			width: '44px',
 			textAlign: 'right',
-			outline: 'none',
+			fontFamily: 'ui-monospace, "SF Mono", "Menlo", "Cascadia Mono", "Consolas", monospace',
 		})
-		// Stop the click from bubbling so editing the field doesn't launch the flow.
-		const swallow = (e: Event) => e.stopPropagation()
-		countdownInput.addEventListener('click', swallow)
-		countdownInput.addEventListener('mousedown', swallow)
-		countdownInput.addEventListener('keydown', (e) => {
-			e.stopPropagation()
-			// Pressing Enter inside the input launches the flow with the current value.
-			if (e.key === 'Enter') itemEl.click()
-		})
+		countdownInput.addEventListener('click', stopBubble)
+		countdownInput.addEventListener('mousedown', stopBubble)
+		countdownInput.addEventListener('keydown', enterLaunches)
 		countdownInput.addEventListener('change', () => {
 			const n = Math.max(0, parseInt(countdownInput!.value, 10) || 0)
 			countdownInput!.value = String(n)
 			setStoredCountdownSec(item, n)
 		})
-
-		const sLabel = document.createElement('span')
-		sLabel.textContent = 's'
-		Object.assign(sLabel.style, {
-			fontSize: '11px',
-			color: 'rgba(255,255,255,0.55)',
-			fontFamily: 'inherit',
-		})
-
-		right.append(countdownInput, sLabel)
-		itemEl.appendChild(right)
+		right.appendChild(
+			buildSubUnit(
+				'',
+				countdownInput,
+				's',
+				isZh ? '点击编辑倒计时秒数' : 'Click to edit countdown seconds'
+			)
+		)
 	}
+
+	itemEl.appendChild(right)
 
 	itemEl.addEventListener('mouseenter', () => {
 		itemEl.style.background = `linear-gradient(135deg, rgba(${accent}, 0.28), rgba(${accent}, 0.12))`
@@ -1405,16 +1751,25 @@ function buildPopoverItem(
 	})
 
 	const launch = (): void => {
-		// Build a per-launch preset that overrides beforeConfirm with the input value.
-		// We clone instead of mutating so the original preset remains unchanged.
-		let launchPreset: ScriptedFlowConfig = item.preset
+		// Build a per-launch preset that carries the popover's startPage / startRow
+		// and (if applicable) overrides beforeConfirm with the countdown input.
+		// We clone instead of mutating so the original preset is untouched.
+		const startPage = pageCtrl.getValue()
+		const startRow = rowCtrl.getValue()
+		setStoredPositiveInt(START_PAGE_STORAGE_PREFIX + item.name, startPage)
+		setStoredPositiveInt(START_ROW_STORAGE_PREFIX + item.name, startRow)
+		let launchPreset: ScriptedFlowConfig = {
+			...item.preset,
+			startPage,
+			startRow,
+		}
 		if (countdownInput) {
 			const sec = Math.max(0, parseInt(countdownInput.value, 10) || 0)
 			setStoredCountdownSec(item, sec)
 			launchPreset = {
-				...item.preset,
+				...launchPreset,
 				delays: {
-					...(item.preset.delays ?? {}),
+					...(launchPreset.delays ?? {}),
 					beforeConfirm: sec * 1000,
 				},
 			}

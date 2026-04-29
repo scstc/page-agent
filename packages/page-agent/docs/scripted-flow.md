@@ -64,8 +64,14 @@ import {
 ```mermaid
 flowchart TD
     Start([runScriptedFlow]) --> ShowHUD[显示 HUD<br/>启用 SimulatorMask]
-    ShowHUD --> PageLoop[按 rowSelector 扫描当前页所有行]
-    PageLoop --> RowLoop[逐行处理]
+    ShowHUD --> Skip{startPage > 1?}
+    Skip -- 是 --> JumpPage[在 .anq-pagination 里找<br/>title=startPage 的按钮，点一下]
+    JumpPage -. 容器/按钮缺失 .-> NotFound([🛑 LocationNotFoundError])
+    Skip -- 否 --> PageLoop
+    JumpPage --> PageLoop[按 rowSelector 扫描当前页所有行]
+    PageLoop --> StartRowGate{第一次循环<br/>且 startRow > 行数?}
+    StartRowGate -- 是 --> NotFound
+    StartRowGate -- 否 --> RowLoop[逐行处理<br/>第一页从 startRow 开始]
     RowLoop --> PerRow[单行流程<br/>见下]
     PerRow --> MoreRows{本页还有行?}
     MoreRows -- 有 --> RowLoop
@@ -74,6 +80,7 @@ flowchart TD
     ClickNext --> PageLoop
     NextBtn -- 否 --> Finish([运行结束<br/>HUD 停留 10s/有错误时 60s])
     Abort[stopScriptedFlow / ⏹] -.每一步前都会检查.-> PerRow
+    PerRow -. 单行重试均失败 .-> Halt([🛑 RetryExhaustedError<br/>中止整个流程])
 ```
 
 ## 单行流程
@@ -111,10 +118,10 @@ flowchart TD
     Backoff --> Reset[startedOpen=true<br/>skipCountdown=true]
     Reset --> AttemptStart
     RetriesLeft -- 无 --> Final[错误保留在 HUD<br/>errors++]
+    Final --> Halt([🛑 中止整个流程<br/>RetryExhaustedError])
 
     Skip --> AfterRow[afterRow 等 1s]
     Succeeded --> AfterRow
-    Final --> AfterRow
     AfterRow --> End([下一行])
 ```
 
@@ -165,6 +172,37 @@ Popconfirm。
 - 重试成功后：该条目会**从列表中移除**。
 
 有错误结尾的运行，HUD 停留 60s（无错误是 10s），方便操作人员看清再自动消失。
+
+### 单行重试用尽 = 中止整个流程
+
+任意一行的 4 次尝试都失败后，runner 抛 `RetryExhaustedError`，**整个流程立即停止**，
+不再继续处理本页剩余行或翻页。HUD 顶部会显示 `🛑 重试均失败，已中止流程：第 N 页第 M 行：...`。
+
+设计取舍：连续命中"操作频繁"通常意味着账号已被服务端节流，继续往下点只会徒增失败计数；
+让用户感知到问题、手动介入比静默跑完一整个失败页更有用。
+
+### 起始位置：`startPage` / `startRow`
+
+`ScriptedFlowConfig` 提供两个 1-based 选项用于"从中间继续跑"：
+
+- `startPage`（默认 1）：**绝对**页号——runner 在分页条 `.anq-pagination` 里找
+  `title=${startPage}` 的 `<li class="anq-pagination-item">`，点一下直接跳过去；
+  当前页就是 `startPage` 时跳过点击。
+- `startRow`（默认 1）：起始页那一页跳过前 `(startRow − 1)` 行；从此之后的页正常从第 1 行开始。
+
+**唯一限制**：目标页必须**当前可见在分页条上**。PDD 的分页条把远端页折叠在 `…` 里，
+比如当前在第 1 页时分页条是 `< 1 2 3 4 5 … 28 >`，想跳第 11 页：必须先在 PDD 上手动
+点 `…` 或相邻页，让 11 出现在分页条上，再启动书签。
+
+popover 的"页"下拉框只列**实际可见的页码**（即上面例子里就是 `[1, 2, 3, 4, 5, 28]`），
+默认选中**当前页**——避免选到一个被折叠的不可达值。
+
+`pagination` 配置可重写四个回调（`containerSelector` / `findPageButton` /
+`listVisiblePages` / `getCurrentPage`）适配非 PDD 站点，默认实现已经覆盖
+PDD 的 antd-style markup。
+
+任何一项越界（找不到分页容器、目标页按钮缺失、起始行超过实际行数）都抛
+`LocationNotFoundError`，HUD 显示 `🛑 找不到指定位置：...`，**中止整个流程**。
 
 ---
 
