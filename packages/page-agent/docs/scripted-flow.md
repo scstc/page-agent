@@ -37,7 +37,7 @@ window.stopScriptedFlow()
 | `packages/page-agent/src/scripted.ts`             | 独立 IIFE 入口 —— 暴露 `window.runScriptedFlow`                     |
 | `packages/page-agent/src/demo.ts`                 | Demo IIFE 入口 —— 同时把 🤖 按钮注入面板                            |
 | `packages/page-agent/vite.scripted.config.js`     | 构建 `dist/iife/page-agent.scripted.js`（约 67 kB）                 |
-| `packages/page-agent/.dev-certs/`                 | mkcert 签发的本地 HTTPS 证书（已 gitignore）                        |
+| `packages/page-agent/.dev-certs/`                 | mkcert 签发的本地 HTTPS 证书（已 gitignore，跑 `npm run setup:dev-certs` 生成） |
 | `packages/website/src/pages/home/HeroSection.tsx` | 通过 `page-agent/scripted-flow` 子路径懒加载按钮注入器              |
 
 公共 API：

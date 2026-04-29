@@ -98,6 +98,38 @@ npm run build:ext
 
 > Warning: AK in your local `.env` will be inlined in the iife script. Be very careful when you distribute the script.
 
+### Testing on HTTPS Sites
+
+The plain `dev:demo` server above speaks HTTP. Modern browsers block loading HTTP scripts from HTTPS pages (mixed content), so the bookmarklet won't work on sites like `https://yangkeduo.com`. To use the bookmarklet on HTTPS sites, run the demo bundle over HTTPS using a locally-trusted [mkcert](https://github.com/FiloSottile/mkcert) cert.
+
+- One-time setup (per machine):
+
+    ```bash
+    # 1. Install mkcert
+    brew install mkcert nss        # macOS
+    choco install mkcert           # Windows
+    # Linux: see https://github.com/FiloSottile/mkcert#linux
+
+    # 2. Generate and trust the cert
+    npm run setup:dev-certs
+    ```
+
+    The script runs `mkcert -install` (installs the local root CA into your system + browser trust stores) and writes a `localhost / 127.0.0.1 / ::1` cert pair into `packages/page-agent/.dev-certs/`. That directory is `.gitignore`-d — each developer must run this on their own machine because mkcert's root CA is per-user.
+
+- Run the HTTPS dev server:
+
+    ```bash
+    npm run dev:demo:https   # serves https://localhost:5174/page-agent.demo.js
+    ```
+
+    Note: this and `npm run dev:scripted` both bind port 5174 — only one can run at a time.
+
+- Use the HTTPS variant of the bookmarklet:
+
+    ```javascript
+    javascript:(function(){var s=document.createElement('script');s.src=`https://localhost:5174/page-agent.demo.js?t=${Math.random()}`;s.onload=()=>console.log(%27PageAgent ready!%27);document.head.appendChild(s);})();
+    ```
+
 ### Adding Documentation
 
 Ask an AI to help you add documentation to the `website/` package. Follow the existing style.

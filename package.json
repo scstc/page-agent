@@ -29,6 +29,7 @@
         "dev:ext": "npm run dev -w @page-agent/ext",
         "dev:demo": "npm run dev:demo --workspace=page-agent",
         "dev:demo:https": "npm run dev:demo:https --workspace=page-agent",
+        "setup:dev-certs": "node scripts/setup-dev-certs.js",
         "build": "node scripts/build.js",
         "build:libs": "node scripts/build-libs.js",
         "build:website": "npm run build:website --workspace=@page-agent/website",
