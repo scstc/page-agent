@@ -62,55 +62,63 @@ but `publishConfig.exports` keeps the published npm package's API at just `.`.
 
 ---
 
-## Per-row flow (CLOSED start)
+## Session flow
 
+```mermaid
+flowchart TD
+    Start([runScriptedFlow]) --> ShowHUD[Show HUD<br/>enable SimulatorMask]
+    ShowHUD --> PageLoop[Scan rows by rowSelector]
+    PageLoop --> RowLoop[For each row]
+    RowLoop --> PerRow[Per-row flow<br/>see below]
+    PerRow --> MoreRows{More rows<br/>on page?}
+    MoreRows -- yes --> RowLoop
+    MoreRows -- no --> NextBtn{Next-page button<br/>present & enabled?}
+    NextBtn -- yes --> ClickNext[Click next page<br/>wait afterPageChange]
+    ClickNext --> PageLoop
+    NextBtn -- no --> Finish([Run complete<br/>HUD lingers 10s / 60s if errors])
+    Abort[stopScriptedFlow / ⏹] -.checked at every step.-> PerRow
 ```
-                          ┌── ROW LOOP ─────────────────────────────┐
-                          │                                         │
-                          │  read switch state                      │
-                          │      │                                  │
-                          │      ▼                                  │
-                          │  OPEN? ───── yes ─── skip (rowsSkippedOpen++)
-                          │      │ no                               │
-                          │      ▼                                  │
-                          │  ┌── ATTEMPT LOOP (1..maxAttempts) ──┐  │
-                          │  │                                   │  │
-                          │  │  ┌──────────────────────────────┐ │  │
-                          │  │  │ pauseRow(startedOpen=false): │ │  │
-                          │  │  │  click switch  (→ OPEN)      │ │  │
-                          │  │  │  wait 1s                     │ │  │
-                          │  │  │  click switch  (triggers     │ │  │
-                          │  │  │                  Popconfirm) │ │  │
-                          │  │  │  wait popup    (≤5s)         │ │  │
-                          │  │  │  countdown 25s (HUD ticks)   │ │  │
-                          │  │  │  wait btn ready (≤5s)        │ │  │
-                          │  │  │  snapshot stale toasts       │ │  │
-                          │  │  │  click 确定暂停              │ │  │
-                          │  │  │  verify toast                │ │  │
-                          │  │  │   ├ success regex → ok       │ │  │
-                          │  │  │   ├ failure regex → throw    │ │  │
-                          │  │  │   └ timeout 3s    → throw    │ │  │
-                          │  │  └──────────────────────────────┘ │  │
-                          │  │      │ ok               │ throw   │  │
-                          │  │      ▼                  ▼         │  │
-                          │  │   succeeded     update HUD error  │  │
-                          │  │   (clear errors  list (per-row)   │  │
-                          │  │    for this row)                  │  │
-                          │  │                  retries left?    │  │
-                          │  │                   ├ yes:          │  │
-                          │  │                   │   wait        │  │
-                          │  │                   │   1s/2s/4s    │  │
-                          │  │                   │   loop again  │  │
-                          │  │                   │   (this time  │  │
-                          │  │                   │    startedOpen│  │
-                          │  │                   │    =true)     │  │
-                          │  │                   └ no:           │  │
-                          │  │                       leave err   │  │
-                          │  │                       in HUD list │  │
-                          │  │                       errors++    │  │
-                          │  └───────────────────────────────────┘  │
-                          │           afterRow wait (1s)            │
-                          └─────────────────────────────────────────┘
+
+## Per-row flow
+
+```mermaid
+flowchart TD
+    Start([Row]) --> Read[Read switch state]
+    Read --> IsOpen{OPEN?}
+    IsOpen -- yes --> Skip[Skip row<br/>rowsSkippedOpen++]
+    IsOpen -- no --> AttemptStart[Attempt n / maxAttempts]
+
+    AttemptStart --> StartedOpen{startedOpen?}
+    StartedOpen -- false<br/>initial --> Click1[Click switch → OPEN]
+    Click1 --> Wait1[wait 1s]
+    Wait1 --> Click2[Click switch → trigger Popconfirm]
+    StartedOpen -- true<br/>retry --> Click2
+    Click2 --> WaitPopup[wait popup ≤5s]
+    WaitPopup --> SkipCD{skipCountdown?}
+    SkipCD -- false<br/>initial --> Countdown[countdown 25–28s<br/>HUD ticks every 1s]
+    SkipCD -- true<br/>retry --> WaitBtn
+    Countdown --> WaitBtn[wait btn ready ≤5s]
+    WaitBtn --> Snapshot[Snapshot stale toasts]
+    Snapshot --> ClickConfirm[Click 确定暂停]
+    ClickConfirm --> Verify{Verify toast}
+
+    Verify -- success regex --> Ok[Success<br/>+ 600ms grace window]
+    Verify -- failure regex --> Failed[Failure]
+    Verify -- 3s timeout --> Failed
+
+    Ok --> Succeeded[rowsActioned++<br/>clear HUD errors for this row]
+    Failed --> UpdateHUD[Overwrite HUD error<br/>entry for this row]
+    UpdateHUD --> RetriesLeft{Retries left?}
+
+    RetriesLeft -- yes --> Backoff[Wait backoff<br/>1s / 2s / 4s]
+    Backoff --> Reset[startedOpen=true<br/>skipCountdown=true]
+    Reset --> AttemptStart
+    RetriesLeft -- no --> Final[Keep error in HUD list<br/>errors++]
+
+    Skip --> AfterRow[afterRow wait 1s]
+    Succeeded --> AfterRow
+    Final --> AfterRow
+    AfterRow --> End([Next row])
 ```
 
 ### Why click twice on a CLOSED switch?
@@ -187,6 +195,20 @@ confirm: {
         timeoutMs: 3000,
     },
 },
+```
+
+```mermaid
+flowchart TD
+    Start[Click confirm button] --> Snap[Pre-click snapshot:<br/>existing toasts ignored]
+    Snap --> Watch[Watch DOM for new toasts<br/>MutationObserver + 200ms poll]
+    Watch --> Match{Toast text matches…}
+
+    Match -- failure regex --> FailWin[Throw failure<br/>failure beats success]
+    Match -- success regex --> Grace[Wait 600ms grace window]
+    Grace --> Recheck{Failure toast<br/>during grace?}
+    Recheck -- yes --> FailWin
+    Recheck -- no --> Success([Resolve success])
+    Match -- 3s timeout / nothing --> TimeoutFail[Throw timeout failure]
 ```
 
 Verification rules:
