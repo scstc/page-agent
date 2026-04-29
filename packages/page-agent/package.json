@@ -55,6 +55,7 @@
         "build:demo": "vite build --config vite.iife.config.js",
         "build:scripted": "vite build --config vite.scripted.config.js",
         "dev:demo": "concurrently \"vite build --config vite.iife.config.js --watch\" \"npx serve dist/iife -p 5174\"",
+        "dev:demo:https": "concurrently \"vite build --config vite.iife.config.js --watch\" \"npx http-server dist/iife -S -C .dev-certs/localhost+2.pem -K .dev-certs/localhost+2-key.pem -p 5174 -c-1 --cors\"",
         "dev:scripted": "concurrently \"vite build --config vite.scripted.config.js --watch\" \"npx http-server dist/iife -S -C .dev-certs/localhost+2.pem -K .dev-certs/localhost+2-key.pem -p 5174 -c-1 --cors\"",
         "prepublishOnly": "node ../../scripts/pre-publish.js",
         "postpublish": "node ../../scripts/post-publish.js"
