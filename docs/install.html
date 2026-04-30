@@ -123,6 +123,37 @@
 		font-size: 12px;
 		color: #ffd699;
 	}
+	.changelog {
+		margin-top: 28px;
+	}
+	.changelog-title {
+		font-size: 14px;
+		font-weight: 600;
+		color: rgba(180, 200, 255, 0.85);
+		margin: 0 0 14px;
+		text-align: center;
+		letter-spacing: 0.5px;
+	}
+	.changelog-day {
+		padding: 12px 16px;
+		border-left: 2px solid rgba(120, 140, 220, 0.35);
+		margin-bottom: 12px;
+	}
+	.changelog-day + .changelog-day { margin-top: 0; }
+	.changelog-date {
+		font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+		font-size: 12px;
+		color: rgba(180, 200, 255, 0.85);
+		margin-bottom: 6px;
+	}
+	.changelog-list {
+		margin: 0;
+		padding-left: 18px;
+		color: var(--muted);
+		font-size: 13px;
+		line-height: 1.7;
+	}
+	.changelog-list li { margin: 0; }
 </style>
 </head>
 <body>
@@ -142,9 +173,9 @@
 		<div class="step-title"><span class="step-num">步骤 2：</span>拖拽下面按钮到收藏夹栏</div>
 		<div class="row">
 			<select class="source-select" id="source">
-				<option value="local">本地 (localhost)</option>
+				<option value="prod" selected>生产 (prod)</option>
 				<option value="test">测试 (test)</option>
-				<option value="prod">生产 (prod)</option>
+				<option value="local">本地 (localhost)</option>
 			</select>
 			<a class="pa-btn" id="bookmarklet" href="#" draggable="true">
 				<span>✨</span><span>WebAgent</span>
@@ -161,6 +192,52 @@
 		<strong>本地模式</strong>需先跑 <code>npm run dev:demo:https</code>，并已通过 <code>npm run setup:dev-certs</code> 信任 mkcert 自签证书。<br>
 		<strong>测试 / 生产模式</strong>的脚本已上传至 OSS，点击书签会先弹口令对话框，从 OSS 拉 SHA-256 哈希列表比对，正确后才注入 web-agent 脚本。
 	</p>
+
+	<section class="changelog">
+		<div class="changelog-title">更新记录</div>
+
+		<div class="changelog-day">
+			<div class="changelog-date">2026-04-30</div>
+			<ul class="changelog-list">
+				<li>脚本化流程支持失败暂停，并可从指定页 / 行恢复</li>
+				<li>新增 HTTPS 本地开发模式 (<code>dev:demo:https</code>)，配套 <code>setup:dev-certs</code> 一键信任证书</li>
+				<li>提供独立的书签安装页（即本页）</li>
+			</ul>
+		</div>
+
+		<div class="changelog-day">
+			<div class="changelog-date">2026-04-29</div>
+			<ul class="changelog-list">
+				<li>新增脚本化流程 (Scripted Flow)：浮层提示、面板按钮、Toast 验证</li>
+				<li>动作失败支持指数退避重试</li>
+			</ul>
+		</div>
+
+		<div class="changelog-day">
+			<div class="changelog-date">2026-04-28</div>
+			<ul class="changelog-list">
+				<li>支持 DeepSeek V4 模型；非 JSON 错误响应可见</li>
+				<li>长会话自动折叠历史步骤，控制 prompt 体积</li>
+			</ul>
+		</div>
+
+		<div class="changelog-day">
+			<div class="changelog-date">2026-04-26</div>
+			<ul class="changelog-list">
+				<li>设置面板改为双栏布局，支持可复用的快速任务与多行输入</li>
+				<li>抑制浏览器自动填充与密码管理器在面板上的弹窗</li>
+			</ul>
+		</div>
+
+		<div class="changelog-day">
+			<div class="changelog-date">2026-04-25</div>
+			<ul class="changelog-list">
+				<li>面板内增加 LLM 设置对话框，支持 JSON 配置导入</li>
+				<li>输出卡片支持 Markdown 渲染，面板加宽</li>
+				<li>长等待期间预取下一步动作；<code>wait</code> 最长支持 3600 秒</li>
+			</ul>
+		</div>
+	</section>
 </main>
 
 <script>
