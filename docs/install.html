@@ -3,60 +3,111 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>淘未来 Web Agent</title>
+<title>淘未来 // WEB AGENT</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@300;400;700&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
 	:root {
-		--bg-1: #060212;
-		--bg-2: #110826;
-		--card-bg: rgba(255, 255, 255, 0.035);
-		--card-border: rgba(255, 255, 255, 0.08);
-		--card-border-hover: rgba(255, 255, 255, 0.22);
-		--text: #f4f0ff;
-		--muted: rgba(255, 255, 255, 0.58);
-		--accent-1: #c2a8ff;
-		--accent-2: #79b8ff;
-		--accent-3: #ff9bd2;
+		--bg-void: #050014;
+		--bg-deep: #0a0420;
+		--neon-pink: #ff006e;
+		--neon-cyan: #00f0ff;
+		--neon-purple: #b026ff;
+		--neon-yellow: #ffee00;
+		--card-bg: rgba(0, 240, 255, 0.025);
+		--card-border: rgba(0, 240, 255, 0.18);
+		--card-border-hover: rgba(0, 240, 255, 0.5);
+		--text: #e8f7ff;
+		--muted: rgba(232, 247, 255, 0.55);
+		--grid: rgba(0, 240, 255, 0.06);
 	}
 	* { box-sizing: border-box; }
 	html, body { margin: 0; padding: 0; }
 	body {
-		font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
-		background: linear-gradient(180deg, var(--bg-1), var(--bg-2));
-		background-attachment: fixed;
+		font-family: "Rajdhani", "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+		background: var(--bg-void);
 		color: var(--text);
 		min-height: 100vh;
 		padding: 64px 20px 80px;
 		line-height: 1.5;
 		-webkit-font-smoothing: antialiased;
 		overflow-x: hidden;
+		cursor: none;
 	}
 
-	/* ---------- Background layers ---------- */
+	/* ---------- 自定义光标 ---------- */
+	.cursor-dot, .cursor-ring {
+		position: fixed;
+		pointer-events: none;
+		z-index: 9999;
+		transform: translate(-50%, -50%);
+		top: 0; left: 0;
+	}
+	.cursor-dot {
+		width: 6px; height: 6px;
+		background: var(--neon-cyan);
+		border-radius: 50%;
+		box-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan);
+	}
+	.cursor-ring {
+		width: 36px; height: 36px;
+		border: 1px solid var(--neon-pink);
+		border-radius: 50%;
+		mix-blend-mode: difference;
+		transition: width 0.25s, height 0.25s, border-color 0.25s;
+	}
+	.cursor-ring.hover { width: 60px; height: 60px; border-color: var(--neon-yellow); }
+
+	/* ---------- 背景层 ---------- */
 	.layer {
 		position: fixed;
 		inset: 0;
 		pointer-events: none;
 	}
+	#particles { z-index: 0; }
+	.layer-grid {
+		z-index: 0;
+		background-image:
+			linear-gradient(var(--grid) 1px, transparent 1px),
+			linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+		background-size: 48px 48px;
+		mask-image: radial-gradient(ellipse at center, black 20%, transparent 75%);
+		-webkit-mask-image: radial-gradient(ellipse at center, black 20%, transparent 75%);
+		animation: gridShift 20s linear infinite;
+	}
+	@keyframes gridShift {
+		from { background-position: 0 0; }
+		to { background-position: 48px 48px; }
+	}
 	.layer-aurora {
 		z-index: 0;
 		background:
-			radial-gradient(ellipse 55% 45% at 18% 22%, rgba(189, 69, 251, 0.30), transparent 60%),
-			radial-gradient(ellipse 55% 45% at 82% 28%, rgba(57, 182, 255, 0.26), transparent 60%),
-			radial-gradient(ellipse 60% 40% at 50% 88%, rgba(255, 110, 199, 0.18), transparent 60%);
-		filter: blur(20px);
+			radial-gradient(ellipse 55% 45% at 18% 22%, rgba(255, 0, 110, 0.28), transparent 60%),
+			radial-gradient(ellipse 55% 45% at 82% 28%, rgba(0, 240, 255, 0.26), transparent 60%),
+			radial-gradient(ellipse 60% 40% at 50% 88%, rgba(176, 38, 255, 0.22), transparent 60%);
+		filter: blur(40px);
 		animation: aurora 18s ease-in-out infinite alternate;
 	}
 	.layer-spotlight {
 		z-index: 1;
-		background: radial-gradient(circle 520px at var(--mx, 50%) var(--my, -10%),
-			rgba(189, 110, 251, 0.20), transparent 60%);
+		background: radial-gradient(circle 480px at var(--mx, 50%) var(--my, -10%),
+			rgba(0, 240, 255, 0.12), transparent 60%);
 		mix-blend-mode: screen;
 		transition: background 60ms linear;
 	}
+	.layer-scanlines {
+		z-index: 3;
+		background: repeating-linear-gradient(
+			0deg,
+			transparent 0,
+			transparent 2px,
+			rgba(0, 240, 255, 0.025) 2px,
+			rgba(0, 240, 255, 0.025) 4px
+		);
+	}
 	@keyframes aurora {
-		0%   { transform: translate3d(0, 0, 0) scale(1);     opacity: 0.95; }
+		0%   { transform: translate3d(0, 0, 0) scale(1);     opacity: 0.85; }
 		50%  { transform: translate3d(24px, -28px, 0) scale(1.06); opacity: 1; }
-		100% { transform: translate3d(-22px, 22px, 0) scale(1);    opacity: 0.85; }
+		100% { transform: translate3d(-22px, 22px, 0) scale(1);    opacity: 0.7; }
 	}
 
 	main {
@@ -69,8 +120,23 @@
 	/* ---------- Hero ---------- */
 	.hero {
 		text-align: center;
-		margin: 0 0 44px;
+		margin: 0 0 48px;
 	}
+	.hero-tag {
+		display: inline-block;
+		font-family: "JetBrains Mono", monospace;
+		font-size: 11px;
+		color: var(--neon-cyan);
+		letter-spacing: 0.4em;
+		padding: 6px 14px;
+		border: 1px solid rgba(0, 240, 255, 0.3);
+		background: rgba(0, 240, 255, 0.05);
+		text-transform: uppercase;
+		margin-bottom: 24px;
+	}
+	.hero-tag::before { content: "◢ "; color: var(--neon-pink); }
+	.hero-tag::after { content: " ◣"; color: var(--neon-pink); }
+
 	.hero-title {
 		margin: 0;
 		display: flex;
@@ -79,45 +145,80 @@
 		gap: 10px;
 	}
 	.hero-zh {
+		font-family: "Orbitron", "PingFang SC", sans-serif;
 		font-size: clamp(56px, 13vw, 92px);
-		font-weight: 800;
-		letter-spacing: -0.02em;
+		font-weight: 900;
+		letter-spacing: -0.01em;
 		line-height: 1;
-		background: linear-gradient(135deg, var(--accent-1) 0%, var(--accent-2) 35%, var(--accent-3) 70%, var(--accent-1) 100%);
+		background: linear-gradient(135deg, var(--neon-cyan) 0%, var(--neon-purple) 45%, var(--neon-pink) 80%, var(--neon-cyan) 100%);
 		background-size: 250% 250%;
 		-webkit-background-clip: text;
 		background-clip: text;
 		color: transparent;
-		filter: drop-shadow(0 8px 32px rgba(160, 120, 255, 0.32));
-		animation: heroFlow 12s linear infinite;
+		filter: drop-shadow(0 0 24px rgba(0, 240, 255, 0.45));
+		animation: heroFlow 10s linear infinite;
+		position: relative;
+	}
+	.hero-zh::before, .hero-zh::after {
+		content: attr(data-text);
+		position: absolute;
+		top: 0; left: 0;
+		width: 100%;
+		background: none;
+		-webkit-text-fill-color: initial;
+		opacity: 0;
+	}
+	.hero-zh::before {
+		color: var(--neon-pink);
+		animation: glitchA 4s infinite;
+		clip-path: polygon(0 0, 100% 0, 100% 33%, 0 33%);
+	}
+	.hero-zh::after {
+		color: var(--neon-cyan);
+		animation: glitchB 4s infinite;
+		clip-path: polygon(0 67%, 100% 67%, 100% 100%, 0 100%);
+	}
+	@keyframes glitchA {
+		0%, 92%, 100% { transform: translate(0); opacity: 0; }
+		93% { transform: translate(-3px, 0); opacity: 0.85; }
+		94% { transform: translate(3px, 0); opacity: 0.85; }
+		95% { transform: translate(0); opacity: 0; }
+	}
+	@keyframes glitchB {
+		0%, 92%, 100% { transform: translate(0); opacity: 0; }
+		93% { transform: translate(3px, 0); opacity: 0.85; }
+		94% { transform: translate(-3px, 0); opacity: 0.85; }
+		95% { transform: translate(0); opacity: 0; }
 	}
 	@keyframes heroFlow {
 		0%   { background-position: 0% 50%; }
 		100% { background-position: 250% 50%; }
 	}
 	.hero-en {
-		font-family: "SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+		font-family: "Orbitron", sans-serif;
 		font-size: clamp(13px, 2.4vw, 16px);
-		font-weight: 600;
+		font-weight: 700;
 		letter-spacing: 0.5em;
 		text-indent: 0.5em;
 		text-transform: uppercase;
-		color: rgba(255, 255, 255, 0.72);
+		color: rgba(0, 240, 255, 0.85);
+		text-shadow: 0 0 12px rgba(0, 240, 255, 0.4);
 	}
 	.hero-tagline {
 		margin: 22px 0 0;
-		font-size: 14px;
+		font-family: "JetBrains Mono", monospace;
+		font-size: 13px;
 		color: var(--muted);
 		letter-spacing: 0.06em;
 	}
+	.hero-tagline::before { content: "// "; color: var(--neon-pink); }
 
-	/* ---------- Card ---------- */
+	/* ---------- Card (赛博风玻璃卡) ---------- */
 	.card {
 		position: relative;
 		background: var(--card-bg);
 		border: 1px solid var(--card-border);
-		border-radius: 16px;
-		padding: 22px 24px;
+		padding: 24px 26px;
 		margin-bottom: 14px;
 		backdrop-filter: blur(14px);
 		-webkit-backdrop-filter: blur(14px);
@@ -126,10 +227,12 @@
 		transform-style: preserve-3d;
 		transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1), border-color 220ms ease, box-shadow 220ms ease;
 		will-change: transform;
+		clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
 	}
 	.card:hover {
 		border-color: var(--card-border-hover);
-		box-shadow: 0 18px 48px -16px rgba(120, 90, 255, 0.35);
+		box-shadow: 0 18px 48px -16px rgba(0, 240, 255, 0.4),
+		            0 0 0 1px rgba(0, 240, 255, 0.15);
 	}
 	.card::before {
 		content: "";
@@ -137,7 +240,7 @@
 		inset: 0;
 		pointer-events: none;
 		background: radial-gradient(circle 280px at var(--card-mx, 50%) var(--card-my, 50%),
-			rgba(255, 255, 255, 0.10), transparent 60%);
+			rgba(0, 240, 255, 0.12), transparent 60%);
 		opacity: 0;
 		transition: opacity 250ms ease;
 	}
@@ -145,9 +248,11 @@
 	.card::after {
 		content: "";
 		position: absolute;
-		inset: 0;
+		top: 0; right: 0;
+		width: 24px; height: 24px;
+		border-top: 1.5px solid var(--neon-pink);
+		border-right: 1.5px solid var(--neon-pink);
 		pointer-events: none;
-		background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 30%);
 	}
 	.card > * { position: relative; z-index: 1; }
 
@@ -156,36 +261,36 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 10px;
-		margin: 0 0 16px;
+		gap: 12px;
+		margin: 0 0 18px;
 	}
 	.step-badge {
 		position: relative;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 22px;
-		height: 22px;
-		border-radius: 50%;
-		background: linear-gradient(135deg, rgba(120, 100, 255, 0.6), rgba(80, 160, 255, 0.6));
-		border: 1px solid rgba(255, 255, 255, 0.22);
+		width: 26px;
+		height: 26px;
+		background: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple));
+		border: 1px solid rgba(0, 240, 255, 0.5);
 		font-size: 12px;
-		font-weight: 700;
-		color: rgba(255, 255, 255, 0.96);
-		font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16),
-		            0 0 0 0 rgba(120, 100, 255, 0.45);
+		font-weight: 900;
+		color: #fff;
+		font-family: "Orbitron", monospace;
+		clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+		text-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
 		animation: badgePulse 2.6s ease-out infinite;
 	}
 	@keyframes badgePulse {
-		0%   { box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 0 0 0 rgba(120, 100, 255, 0.45); }
-		70%  { box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 0 0 8px rgba(120, 100, 255, 0); }
-		100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 0 0 0 rgba(120, 100, 255, 0); }
+		0%, 100% { filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.6)); }
+		50%      { filter: drop-shadow(0 0 14px rgba(0, 240, 255, 1)); }
 	}
 	.step-text {
-		font-size: 15px;
-		font-weight: 600;
-		color: rgba(255, 255, 255, 0.92);
+		font-family: "Orbitron", "PingFang SC", sans-serif;
+		font-size: 14px;
+		font-weight: 700;
+		color: rgba(255, 255, 255, 0.95);
+		letter-spacing: 0.05em;
 	}
 
 	/* ---------- Row ---------- */
@@ -198,49 +303,63 @@
 	}
 	kbd {
 		display: inline-block;
-		padding: 6px 12px;
-		background: rgba(0, 0, 0, 0.32);
-		border: 1px solid rgba(255, 255, 255, 0.16);
-		border-radius: 6px;
-		font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
+		padding: 7px 14px;
+		background: rgba(0, 0, 0, 0.45);
+		border: 1px solid rgba(0, 240, 255, 0.35);
+		font-family: "JetBrains Mono", monospace;
 		font-size: 13px;
-		color: rgba(255, 255, 255, 0.92);
-		box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+		color: var(--neon-cyan);
+		box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+		            0 0 12px rgba(0, 240, 255, 0.15);
+		text-shadow: 0 0 6px rgba(0, 240, 255, 0.5);
 	}
-	.kb-or { color: var(--muted); font-size: 13px; }
+	.kb-or {
+		color: var(--neon-pink);
+		font-family: "JetBrains Mono", monospace;
+		font-size: 12px;
+		letter-spacing: 0.2em;
+	}
 
 	/* ---------- Source select ---------- */
 	.source-select {
-		padding: 9px 12px;
-		background: rgba(0, 0, 0, 0.32);
-		color: white;
-		border: 1px solid rgba(255, 255, 255, 0.18);
-		border-radius: 8px;
-		font-family: inherit;
-		font-size: 13px;
+		padding: 10px 14px;
+		background: rgba(0, 0, 0, 0.45);
+		color: var(--neon-cyan);
+		border: 1px solid rgba(0, 240, 255, 0.35);
+		font-family: "JetBrains Mono", monospace;
+		font-size: 12px;
+		letter-spacing: 0.1em;
 		outline: none;
-		cursor: pointer;
-		transition: border-color 200ms ease;
+		cursor: none;
+		transition: border-color 200ms ease, box-shadow 200ms ease;
+		text-transform: uppercase;
 	}
-	.source-select:hover { border-color: rgba(255, 255, 255, 0.32); }
-	.source-select:focus-visible { border-color: var(--accent-2); }
+	.source-select:hover {
+		border-color: var(--neon-cyan);
+		box-shadow: 0 0 16px rgba(0, 240, 255, 0.25);
+	}
+	.source-select:focus-visible { border-color: var(--neon-yellow); }
+	.source-select option { background: var(--bg-deep); color: var(--text); }
 
-	/* ---------- Bookmarklet button (with shimmer sweep) ---------- */
+	/* ---------- Bookmarklet button (霓虹流光) ---------- */
 	.pa-btn {
 		position: relative;
 		display: inline-flex;
 		align-items: center;
-		gap: 7px;
-		padding: 10px 20px;
-		background: linear-gradient(135deg, #3a8fff 0%, #6a4dff 60%, #ad4dff 100%);
-		color: white !important;
+		gap: 8px;
+		padding: 11px 22px;
+		background: linear-gradient(135deg, var(--neon-pink) 0%, var(--neon-purple) 60%, var(--neon-cyan) 100%);
+		color: #fff !important;
 		text-decoration: none;
-		border-radius: 9px;
-		font-weight: 600;
-		font-size: 14px;
+		font-family: "Orbitron", sans-serif;
+		font-weight: 700;
+		font-size: 13px;
+		letter-spacing: 0.15em;
+		text-transform: uppercase;
+		clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
 		box-shadow:
-			0 6px 20px rgba(106, 77, 255, 0.42),
-			inset 0 1px 0 rgba(255, 255, 255, 0.18);
+			0 6px 24px rgba(255, 0, 110, 0.45),
+			inset 0 1px 0 rgba(255, 255, 255, 0.2);
 		cursor: grab;
 		user-select: none;
 		overflow: hidden;
@@ -250,7 +369,7 @@
 		content: "";
 		position: absolute;
 		inset: 0;
-		background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.42) 50%, transparent 70%);
+		background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.5) 50%, transparent 70%);
 		transform: translateX(-100%);
 		transition: transform 700ms ease;
 		pointer-events: none;
@@ -259,75 +378,132 @@
 	.pa-btn > * { position: relative; z-index: 1; }
 	.pa-btn:active { cursor: grabbing; transform: translateY(1px); }
 	.pa-btn:hover {
-		filter: brightness(1.12);
+		filter: brightness(1.15);
 		box-shadow:
-			0 10px 32px rgba(106, 77, 255, 0.6),
-			inset 0 1px 0 rgba(255, 255, 255, 0.2);
+			0 10px 36px rgba(255, 0, 110, 0.65),
+			0 0 24px rgba(0, 240, 255, 0.4),
+			inset 0 1px 0 rgba(255, 255, 255, 0.25);
 	}
+
 	.hint {
-		margin-top: 10px;
+		margin-top: 12px;
 		text-align: center;
-		font-size: 12px;
+		font-family: "JetBrains Mono", monospace;
+		font-size: 11px;
 		color: var(--muted);
+		letter-spacing: 0.05em;
 	}
+	.hint::before { content: "> "; color: var(--neon-yellow); }
 
 	/* ---------- Note ---------- */
 	.note {
-		margin-top: 28px;
-		padding: 16px 18px;
-		background: rgba(255, 200, 80, 0.05);
-		border: 1px solid rgba(255, 200, 80, 0.18);
-		border-radius: 12px;
+		margin-top: 32px;
+		padding: 18px 20px;
+		background: rgba(255, 238, 0, 0.04);
+		border: 1px solid rgba(255, 238, 0, 0.25);
 		color: var(--muted);
-		font-size: 13px;
-		line-height: 1.7;
+		font-family: "JetBrains Mono", monospace;
+		font-size: 12.5px;
+		line-height: 1.8;
+		clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+		position: relative;
 	}
-	.note strong { color: rgba(255, 220, 140, 0.92); }
+	.note::before {
+		content: "⚠ WARN";
+		position: absolute;
+		top: -1px; right: 14px;
+		background: var(--neon-yellow);
+		color: var(--bg-void);
+		padding: 2px 8px;
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.2em;
+		font-family: "Orbitron", sans-serif;
+	}
+	.note strong { color: var(--neon-yellow); font-weight: 700; }
 	.note code {
-		background: rgba(0, 0, 0, 0.35);
-		padding: 2px 6px;
-		border-radius: 4px;
-		font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-		font-size: 12px;
-		color: #ffd699;
+		background: rgba(0, 0, 0, 0.5);
+		padding: 2px 7px;
+		font-family: "JetBrains Mono", monospace;
+		font-size: 11.5px;
+		color: var(--neon-cyan);
+		border: 1px solid rgba(0, 240, 255, 0.25);
 	}
 
 	/* ---------- Changelog ---------- */
-	.changelog { margin-top: 36px; }
+	.changelog { margin-top: 44px; }
 	.changelog-title {
+		font-family: "Orbitron", sans-serif;
 		font-size: 12px;
-		font-weight: 600;
-		color: rgba(180, 200, 255, 0.85);
-		margin: 0 0 18px;
+		font-weight: 700;
+		color: var(--neon-cyan);
+		margin: 0 0 24px;
 		text-align: center;
 		letter-spacing: 0.4em;
 		text-indent: 0.4em;
 		text-transform: uppercase;
+		text-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
 	}
+	.changelog-title::before { content: "// "; color: var(--neon-pink); }
+	.changelog-title::after { content: " //"; color: var(--neon-pink); }
+
 	.changelog-day {
-		padding: 12px 16px;
-		border-left: 2px solid rgba(120, 140, 220, 0.4);
+		padding: 14px 18px;
+		border-left: 2px solid var(--neon-purple);
 		margin-bottom: 14px;
+		background: linear-gradient(90deg, rgba(176, 38, 255, 0.05), transparent 60%);
+		position: relative;
+		transition: border-color 0.3s, background 0.3s;
 	}
-	.changelog-day + .changelog-day { margin-top: 0; }
+	.changelog-day::before {
+		content: "";
+		position: absolute;
+		left: -5px; top: 18px;
+		width: 8px; height: 8px;
+		background: var(--neon-cyan);
+		border-radius: 50%;
+		box-shadow: 0 0 10px var(--neon-cyan);
+	}
+	.changelog-day:hover {
+		border-color: var(--neon-cyan);
+		background: linear-gradient(90deg, rgba(0, 240, 255, 0.06), transparent 60%);
+	}
 	.changelog-date {
-		font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+		font-family: "JetBrains Mono", monospace;
 		font-size: 12px;
-		color: rgba(180, 200, 255, 0.85);
-		margin-bottom: 6px;
+		color: var(--neon-cyan);
+		margin-bottom: 8px;
+		letter-spacing: 0.1em;
 	}
+	.changelog-date::before { content: "[ "; color: var(--neon-pink); }
+	.changelog-date::after { content: " ]"; color: var(--neon-pink); }
 	.changelog-list {
 		margin: 0;
-		padding-left: 18px;
+		padding-left: 20px;
 		color: var(--muted);
 		font-size: 13px;
-		line-height: 1.7;
+		line-height: 1.75;
+		list-style: none;
 	}
-	.changelog-list li { margin: 0; }
+	.changelog-list li { position: relative; margin-bottom: 4px; }
+	.changelog-list li::before {
+		content: "▸";
+		position: absolute;
+		left: -16px;
+		color: var(--neon-pink);
+	}
+	.changelog-list code {
+		background: rgba(0, 0, 0, 0.5);
+		padding: 1px 6px;
+		font-family: "JetBrains Mono", monospace;
+		font-size: 11.5px;
+		color: var(--neon-cyan);
+		border: 1px solid rgba(0, 240, 255, 0.2);
+	}
 
 	/* ---------- Entry animations ---------- */
 	@keyframes fadeUp {
-		from { opacity: 0; transform: translateY(16px); }
+		from { opacity: 0; transform: translateY(24px); }
 		to   { opacity: 1; transform: translateY(0); }
 	}
 	@keyframes fadeIn {
@@ -337,16 +513,48 @@
 	.hero, .note, .changelog {
 		animation: fadeUp 700ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
 	}
-	.card {
-		/* card has its own 3D transform — only fade in to avoid transform conflict */
-		animation: fadeIn 700ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
-	}
+	.card { animation: fadeIn 700ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
 	.hero { animation-delay: 0ms; }
 	main > .card:nth-of-type(1) { animation-delay: 100ms; }
 	main > .card:nth-of-type(2) { animation-delay: 200ms; }
 	main > .card:nth-of-type(3) { animation-delay: 300ms; }
 	.note      { animation-delay: 400ms; }
 	.changelog { animation-delay: 500ms; }
+
+	/* ---------- 滚动揭示 ---------- */
+	.changelog-day {
+		opacity: 0;
+		transform: translateX(-20px);
+		transition: opacity 0.6s ease, transform 0.6s ease, border-color 0.3s, background 0.3s;
+	}
+	.changelog-day.visible {
+		opacity: 1;
+		transform: translateX(0);
+	}
+
+	/* ---------- 状态栏 ---------- */
+	.status-bar {
+		position: fixed;
+		bottom: 0; left: 0; right: 0;
+		display: flex;
+		justify-content: space-between;
+		padding: 8px 24px;
+		font-family: "JetBrains Mono", monospace;
+		font-size: 10px;
+		color: rgba(0, 240, 255, 0.5);
+		letter-spacing: 0.2em;
+		text-transform: uppercase;
+		background: rgba(5, 0, 20, 0.85);
+		backdrop-filter: blur(10px);
+		border-top: 1px solid rgba(0, 240, 255, 0.15);
+		z-index: 50;
+	}
+	.status-bar span::before {
+		content: "● ";
+		color: var(--neon-cyan);
+		animation: blink 2s infinite;
+	}
+	@keyframes blink { 50% { opacity: 0.3; } }
 
 	/* ---------- Reduced motion ---------- */
 	@media (prefers-reduced-motion: reduce) {
@@ -357,16 +565,46 @@
 		.card { transform: none !important; }
 		.layer { display: none; }
 	}
+	@media (max-width: 600px) {
+		body { cursor: auto; padding: 36px 14px 60px; }
+		.cursor-dot, .cursor-ring { display: none; }
+		.pa-btn, .source-select { cursor: pointer; }
+		.status-bar { font-size: 9px; padding: 6px 12px; }
+
+		/* Stack row content vertically — kills the kbd / OR / kbd
+		   awkward inline wrap on narrow screens. */
+		.row { flex-direction: column; gap: 10px; flex-wrap: nowrap; }
+
+		/* Tighten chrome so content gets more breathing room. */
+		main { max-width: 100%; }
+		.card { padding: 18px 18px; }
+		.step-head { gap: 8px; margin: 0 0 14px; }
+		.step-text { font-size: 13px; }
+		.hint { font-size: 11px; padding: 0 6px; }
+		.note { padding: 14px 16px; font-size: 12px; }
+		.changelog-day { padding: 12px 14px; }
+		.changelog-list { font-size: 12.5px; }
+		.hero { margin: 0 0 32px; }
+		.hero-tag { font-size: 10px; letter-spacing: 0.3em; padding: 5px 10px; }
+		.hero-tagline { font-size: 12px; padding: 0 8px; }
+	}
 </style>
 </head>
 <body>
+<div class="cursor-dot"></div>
+<div class="cursor-ring"></div>
+
+<canvas id="particles" class="layer"></canvas>
+<div class="layer layer-grid" aria-hidden="true"></div>
 <div class="layer layer-aurora" aria-hidden="true"></div>
 <div class="layer layer-spotlight" aria-hidden="true"></div>
+<div class="layer layer-scanlines" aria-hidden="true"></div>
 
 <main>
 	<header class="hero">
+		<div class="hero-tag">系统在线 · 版本 V2026.04.30</div>
 		<h1 class="hero-title">
-			<span class="hero-zh">淘未来</span>
+			<span class="hero-zh" data-text="淘未来">淘未来</span>
 			<span class="hero-en">Web Agent</span>
 		</h1>
 		<p class="hero-tagline">让 AI 替你淘每一个网页</p>
@@ -379,7 +617,7 @@
 		</div>
 		<div class="row">
 			<kbd>Ctrl + Shift + B</kbd>
-			<span class="kb-or">或</span>
+			<span class="kb-or">/ OR /</span>
 			<kbd>⌘ + Shift + B</kbd>
 		</div>
 	</section>
@@ -391,9 +629,9 @@
 		</div>
 		<div class="row">
 			<select class="source-select" id="source">
-				<option value="prod" selected>生产 (prod)</option>
-				<option value="test">测试 (test)</option>
-				<option value="local">本地 (localhost)</option>
+				<option value="prod" selected>生产 (PROD)</option>
+				<option value="test">测试 (TEST)</option>
+				<option value="local">本地 (LOCALHOST)</option>
 			</select>
 			<a class="pa-btn" id="bookmarklet" href="#" draggable="true">
 				<span>✨</span><span>WebAgent</span>
@@ -461,6 +699,12 @@
 	</section>
 </main>
 
+<div class="status-bar">
+	<span>NODE_01 · ONLINE</span>
+	<span>LAT: 12ms</span>
+	<span id="clock">--:--:--</span>
+</div>
+
 <script>
 	const SOURCES = {
 		'local':     'https://localhost:5174/page-agent.demo.js',
@@ -470,9 +714,6 @@
 	const PASSWORD_URL = 'https://smart-site-2022.oss-cn-beijing.aliyuncs.com/password.txt';
 
 	function buildBookmarklet(scriptUrl) {
-		// Single-line javascript: URL. Escape backslashes (regex \r?\n) once for the JS string,
-		// nothing else needs special handling because the bookmarklet body uses only single
-		// quotes and template-literal-free string concatenation.
 		return "javascript:(async () => { const p = prompt('请输入口令:'); if (!p) return; try { const r = await fetch('" + PASSWORD_URL + "', {cache:'no-store'}); if (!r.ok) throw new Error('HTTP ' + r.status); const hashes = (await r.text()).split(/\\r?\\n/).map(l=>l.trim().toLowerCase()).filter(l=>/^[0-9a-f]{64}$/.test(l)); const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(p.trim())); const hex = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join(''); if (!hashes.includes(hex)) return alert('口令错误'); const s = document.createElement('script'); s.src = '" + scriptUrl + "?t=' + Math.random(); s.onload = () => console.log('WebAgent demo ready!'); document.head.appendChild(s); } catch (e) { console.error('[pa-bookmarklet]', e); alert('错误: ' + (e && e.message ? e.message : String(e))); } })();";
 	}
 
@@ -484,8 +725,6 @@
 	}
 	select.addEventListener('change', update);
 
-	// Block click activation — the bookmarklet only makes sense when invoked
-	// on the actual target page, not on this install page.
 	link.addEventListener('click', (e) => {
 		e.preventDefault();
 		alert('请用鼠标按住此按钮拖到浏览器收藏夹栏，不要点击。');
@@ -493,29 +732,61 @@
 
 	update();
 
-	// ---------- Mouse-driven flair ----------
+	// ---------- 时钟 ----------
+	function tickClock() {
+		const d = new Date();
+		const pad = n => String(n).padStart(2, '0');
+		document.getElementById('clock').textContent =
+			d.getFullYear() + '.' + pad(d.getMonth()+1) + '.' + pad(d.getDate()) + ' // ' +
+			pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+	}
+	tickClock();
+	setInterval(tickClock, 1000);
+
 	const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	const isMobile = window.matchMedia('(max-width: 600px)').matches;
+
 	if (!reducedMotion) {
-		// 1) Page-wide ambient spotlight follows the cursor.
+		// ---------- 自定义光标 ----------
+		if (!isMobile) {
+			const dot = document.querySelector('.cursor-dot');
+			const ring = document.querySelector('.cursor-ring');
+			let mx = window.innerWidth / 2, my = window.innerHeight / 2;
+			let rx = mx, ry = my;
+			document.addEventListener('pointermove', e => {
+				mx = e.clientX; my = e.clientY;
+				dot.style.transform = `translate(${mx}px, ${my}px) translate(-50%, -50%)`;
+			}, { passive: true });
+			(function loop() {
+				rx += (mx - rx) * 0.18;
+				ry += (my - ry) * 0.18;
+				ring.style.transform = `translate(${rx}px, ${ry}px) translate(-50%, -50%)`;
+				requestAnimationFrame(loop);
+			})();
+			document.querySelectorAll('a, button, .card, .pa-btn, .source-select, kbd, .changelog-day').forEach(el => {
+				el.addEventListener('pointerenter', () => ring.classList.add('hover'));
+				el.addEventListener('pointerleave', () => ring.classList.remove('hover'));
+			});
+		}
+
+		// ---------- 全局聚光灯 ----------
 		document.addEventListener('pointermove', (e) => {
 			document.body.style.setProperty('--mx', e.clientX + 'px');
 			document.body.style.setProperty('--my', e.clientY + 'px');
 		}, { passive: true });
 
-		// 2) Per-card spotlight + 3D parallax tilt.
+		// ---------- 卡片 3D 视差 + 局部聚光 ----------
 		document.querySelectorAll('.card').forEach((card) => {
 			let rect = null;
-			card.addEventListener('pointerenter', () => {
-				rect = card.getBoundingClientRect();
-			});
+			card.addEventListener('pointerenter', () => { rect = card.getBoundingClientRect(); });
 			card.addEventListener('pointermove', (e) => {
 				if (!rect) rect = card.getBoundingClientRect();
 				const x = e.clientX - rect.left;
 				const y = e.clientY - rect.top;
 				const cx = rect.width / 2;
 				const cy = rect.height / 2;
-				const rx = ((y - cy) / cy) * -3;  // tilt up to ±3deg
-				const ry = ((x - cx) / cx) *  3;
+				const rx = ((y - cy) / cy) * -4;
+				const ry = ((x - cx) / cx) *  4;
 				card.style.setProperty('--card-mx', x + 'px');
 				card.style.setProperty('--card-my', y + 'px');
 				card.style.setProperty('--rx', rx + 'deg');
@@ -527,6 +798,85 @@
 				rect = null;
 			});
 		});
+
+		// ---------- 粒子背景 ----------
+		const canvas = document.getElementById('particles');
+		const ctx = canvas.getContext('2d');
+		let W, H, particles = [];
+		const COLORS = ['#00f0ff', '#ff006e', '#b026ff'];
+		function resize() {
+			W = canvas.width = window.innerWidth;
+			H = canvas.height = window.innerHeight;
+		}
+		function spawn() {
+			const count = isMobile ? 30 : 70;
+			particles = [];
+			for (let i = 0; i < count; i++) {
+				particles.push({
+					x: Math.random() * W,
+					y: Math.random() * H,
+					vx: (Math.random() - 0.5) * 0.3,
+					vy: (Math.random() - 0.5) * 0.3,
+					r: Math.random() * 1.5 + 0.5,
+					c: COLORS[Math.floor(Math.random() * COLORS.length)],
+					a: Math.random() * 0.5 + 0.2
+				});
+			}
+		}
+		resize(); spawn();
+		window.addEventListener('resize', () => { resize(); spawn(); });
+
+		function draw() {
+			ctx.clearRect(0, 0, W, H);
+			// 粒子
+			particles.forEach(p => {
+				p.x += p.vx; p.y += p.vy;
+				if (p.x < 0 || p.x > W) p.vx *= -1;
+				if (p.y < 0 || p.y > H) p.vy *= -1;
+				ctx.beginPath();
+				ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+				ctx.fillStyle = p.c;
+				ctx.globalAlpha = p.a;
+				ctx.shadowBlur = 8;
+				ctx.shadowColor = p.c;
+				ctx.fill();
+			});
+			// 连线
+			ctx.shadowBlur = 0;
+			for (let i = 0; i < particles.length; i++) {
+				for (let j = i + 1; j < particles.length; j++) {
+					const dx = particles[i].x - particles[j].x;
+					const dy = particles[i].y - particles[j].y;
+					const d = Math.sqrt(dx * dx + dy * dy);
+					if (d < 110) {
+						ctx.beginPath();
+						ctx.moveTo(particles[i].x, particles[i].y);
+						ctx.lineTo(particles[j].x, particles[j].y);
+						ctx.strokeStyle = '#00f0ff';
+						ctx.globalAlpha = (1 - d / 110) * 0.15;
+						ctx.lineWidth = 0.5;
+						ctx.stroke();
+					}
+				}
+			}
+			ctx.globalAlpha = 1;
+			requestAnimationFrame(draw);
+		}
+		draw();
+
+		// ---------- 滚动揭示 ----------
+		const io = new IntersectionObserver(entries => {
+			entries.forEach(e => {
+				if (e.isIntersecting) {
+					e.target.classList.add('visible');
+					io.unobserve(e.target);
+				}
+			});
+		}, { threshold: 0.15 });
+		document.querySelectorAll('.changelog-day').forEach(el => io.observe(el));
+	} else {
+		// 减弱动画时直接显示
+		document.querySelectorAll('.changelog-day').forEach(el => el.classList.add('visible'));
 	}
 </script>
 </body>
