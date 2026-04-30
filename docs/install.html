@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>安装 Web Agent</title>
+<style>
+	:root {
+		--bg-1: #0a0418;
+		--bg-2: #150a26;
+		--card-bg: rgba(255, 255, 255, 0.04);
+		--card-border: rgba(255, 255, 255, 0.08);
+		--text: #f4f0ff;
+		--muted: rgba(255, 255, 255, 0.6);
+	}
+	* { box-sizing: border-box; }
+	html, body { margin: 0; padding: 0; }
+	body {
+		font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+		background:
+			radial-gradient(ellipse at top left, rgba(189, 69, 251, 0.18), transparent 60%),
+			radial-gradient(ellipse at top right, rgba(57, 182, 255, 0.18), transparent 60%),
+			linear-gradient(180deg, var(--bg-1), var(--bg-2));
+		background-attachment: fixed;
+		color: var(--text);
+		min-height: 100vh;
+		padding: 48px 20px;
+		line-height: 1.5;
+	}
+	main { max-width: 560px; margin: 0 auto; }
+	h1 {
+		text-align: center;
+		font-size: 28px;
+		font-weight: 700;
+		margin: 0 0 36px;
+		letter-spacing: 0.5px;
+	}
+	.card {
+		background: var(--card-bg);
+		border: 1px solid var(--card-border);
+		border-radius: 14px;
+		padding: 22px 24px;
+		margin-bottom: 14px;
+		backdrop-filter: blur(8px);
+	}
+	.step-title {
+		font-size: 15px;
+		font-weight: 600;
+		margin: 0 0 14px;
+		text-align: center;
+	}
+	.step-num { color: rgba(180, 200, 255, 0.85); }
+	.row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		justify-content: center;
+		flex-wrap: wrap;
+	}
+	kbd {
+		display: inline-block;
+		padding: 5px 11px;
+		background: rgba(0, 0, 0, 0.3);
+		border: 1px solid rgba(255, 255, 255, 0.18);
+		border-radius: 6px;
+		font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
+		font-size: 13px;
+		color: rgba(255, 255, 255, 0.9);
+	}
+	.kb-or { color: var(--muted); font-size: 13px; }
+	.source-select {
+		padding: 8px 12px;
+		background: rgba(0, 0, 0, 0.3);
+		color: white;
+		border: 1px solid rgba(255, 255, 255, 0.18);
+		border-radius: 6px;
+		font-family: inherit;
+		font-size: 13px;
+		outline: none;
+		cursor: pointer;
+	}
+	.pa-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 9px 18px;
+		background: linear-gradient(135deg, #3a8fff, #6a4dff);
+		color: white !important;
+		text-decoration: none;
+		border-radius: 8px;
+		font-weight: 600;
+		font-size: 14px;
+		box-shadow:
+			0 4px 16px rgba(58, 143, 255, 0.4),
+			inset 0 1px 0 rgba(255, 255, 255, 0.15);
+		cursor: grab;
+		user-select: none;
+	}
+	.pa-btn:active { cursor: grabbing; }
+	.pa-btn:hover { filter: brightness(1.12); }
+	.hint {
+		margin-top: 8px;
+		text-align: center;
+		font-size: 12px;
+		color: var(--muted);
+	}
+	.note {
+		margin-top: 28px;
+		padding: 16px 18px;
+		background: rgba(255, 200, 80, 0.05);
+		border: 1px solid rgba(255, 200, 80, 0.18);
+		border-radius: 10px;
+		color: var(--muted);
+		font-size: 13px;
+		line-height: 1.7;
+	}
+	.note strong { color: rgba(255, 220, 140, 0.9); }
+	.note code {
+		background: rgba(0, 0, 0, 0.35);
+		padding: 2px 6px;
+		border-radius: 4px;
+		font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+		font-size: 12px;
+		color: #ffd699;
+	}
+</style>
+</head>
+<body>
+<main>
+	<h1>安装 Web Agent</h1>
+
+	<section class="card">
+		<div class="step-title"><span class="step-num">步骤 1：</span>显示收藏夹栏</div>
+		<div class="row">
+			<kbd>Ctrl + Shift + B</kbd>
+			<span class="kb-or">或</span>
+			<kbd>⌘ + Shift + B</kbd>
+		</div>
+	</section>
+
+	<section class="card">
+		<div class="step-title"><span class="step-num">步骤 2：</span>拖拽下面按钮到收藏夹栏</div>
+		<div class="row">
+			<select class="source-select" id="source">
+				<option value="local">本地 (localhost)</option>
+				<option value="test">测试 (test)</option>
+				<option value="prod">生产 (prod)</option>
+			</select>
+			<a class="pa-btn" id="bookmarklet" href="#" draggable="true">
+				<span>✨</span><span>WebAgent</span>
+			</a>
+		</div>
+		<div class="hint">点击不会启动；请用鼠标按住按钮拖到收藏夹栏</div>
+	</section>
+
+	<section class="card">
+		<div class="step-title"><span class="step-num">步骤 3：</span>在其他网站点击收藏夹中的按钮即可使用</div>
+	</section>
+
+	<p class="note">
+		<strong>本地模式</strong>需先跑 <code>npm run dev:demo:https</code>，并已通过 <code>npm run setup:dev-certs</code> 信任 mkcert 自签证书。<br>
+		<strong>测试 / 生产模式</strong>的脚本已上传至 OSS，点击书签会先弹口令对话框，从 OSS 拉 SHA-256 哈希列表比对，正确后才注入 web-agent 脚本。
+	</p>
+</main>
+
+<script>
+	const SOURCES = {
+		'local':     'https://localhost:5174/page-agent.demo.js',
+		'test':      'https://smart-site-2022.oss-cn-beijing.aliyuncs.com/web-agent.test.js',
+		'prod':      'https://smart-site-2022.oss-cn-beijing.aliyuncs.com/web-agent.prod.js',
+	};
+	const PASSWORD_URL = 'https://smart-site-2022.oss-cn-beijing.aliyuncs.com/password.txt';
+
+	function buildBookmarklet(scriptUrl) {
+		// Single-line javascript: URL. Escape backslashes (regex \r?\n) once for the JS string,
+		// nothing else needs special handling because the bookmarklet body uses only single
+		// quotes and template-literal-free string concatenation.
+		return "javascript:(async () => { const p = prompt('请输入口令:'); if (!p) return; try { const r = await fetch('" + PASSWORD_URL + "', {cache:'no-store'}); if (!r.ok) throw new Error('HTTP ' + r.status); const hashes = (await r.text()).split(/\\r?\\n/).map(l=>l.trim().toLowerCase()).filter(l=>/^[0-9a-f]{64}$/.test(l)); const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(p.trim())); const hex = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join(''); if (!hashes.includes(hex)) return alert('口令错误'); const s = document.createElement('script'); s.src = '" + scriptUrl + "?t=' + Math.random(); s.onload = () => console.log('WebAgent demo ready!'); document.head.appendChild(s); } catch (e) { console.error('[pa-bookmarklet]', e); alert('错误: ' + (e && e.message ? e.message : String(e))); } })();";
+	}
+
+	const select = document.getElementById('source');
+	const link = document.getElementById('bookmarklet');
+
+	function update() {
+		link.href = buildBookmarklet(SOURCES[select.value]);
+	}
+	select.addEventListener('change', update);
+
+	// Block click activation — the bookmarklet only makes sense when invoked
+	// on the actual target page, not on this install page.
+	link.addEventListener('click', (e) => {
+		e.preventDefault();
+		alert('请用鼠标按住此按钮拖到浏览器收藏夹栏，不要点击。');
+	});
+
+	update();
+</script>
+</body>
+</html>
