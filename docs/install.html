@@ -3,53 +3,192 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>安装 Web Agent</title>
+<title>淘未来 Web Agent</title>
 <style>
 	:root {
-		--bg-1: #0a0418;
-		--bg-2: #150a26;
-		--card-bg: rgba(255, 255, 255, 0.04);
+		--bg-1: #060212;
+		--bg-2: #110826;
+		--card-bg: rgba(255, 255, 255, 0.035);
 		--card-border: rgba(255, 255, 255, 0.08);
+		--card-border-hover: rgba(255, 255, 255, 0.22);
 		--text: #f4f0ff;
-		--muted: rgba(255, 255, 255, 0.6);
+		--muted: rgba(255, 255, 255, 0.58);
+		--accent-1: #c2a8ff;
+		--accent-2: #79b8ff;
+		--accent-3: #ff9bd2;
 	}
 	* { box-sizing: border-box; }
 	html, body { margin: 0; padding: 0; }
 	body {
 		font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
-		background:
-			radial-gradient(ellipse at top left, rgba(189, 69, 251, 0.18), transparent 60%),
-			radial-gradient(ellipse at top right, rgba(57, 182, 255, 0.18), transparent 60%),
-			linear-gradient(180deg, var(--bg-1), var(--bg-2));
+		background: linear-gradient(180deg, var(--bg-1), var(--bg-2));
 		background-attachment: fixed;
 		color: var(--text);
 		min-height: 100vh;
-		padding: 48px 20px;
+		padding: 64px 20px 80px;
 		line-height: 1.5;
+		-webkit-font-smoothing: antialiased;
+		overflow-x: hidden;
 	}
-	main { max-width: 560px; margin: 0 auto; }
-	h1 {
+
+	/* ---------- Background layers ---------- */
+	.layer {
+		position: fixed;
+		inset: 0;
+		pointer-events: none;
+	}
+	.layer-aurora {
+		z-index: 0;
+		background:
+			radial-gradient(ellipse 55% 45% at 18% 22%, rgba(189, 69, 251, 0.30), transparent 60%),
+			radial-gradient(ellipse 55% 45% at 82% 28%, rgba(57, 182, 255, 0.26), transparent 60%),
+			radial-gradient(ellipse 60% 40% at 50% 88%, rgba(255, 110, 199, 0.18), transparent 60%);
+		filter: blur(20px);
+		animation: aurora 18s ease-in-out infinite alternate;
+	}
+	.layer-spotlight {
+		z-index: 1;
+		background: radial-gradient(circle 520px at var(--mx, 50%) var(--my, -10%),
+			rgba(189, 110, 251, 0.20), transparent 60%);
+		mix-blend-mode: screen;
+		transition: background 60ms linear;
+	}
+	@keyframes aurora {
+		0%   { transform: translate3d(0, 0, 0) scale(1);     opacity: 0.95; }
+		50%  { transform: translate3d(24px, -28px, 0) scale(1.06); opacity: 1; }
+		100% { transform: translate3d(-22px, 22px, 0) scale(1);    opacity: 0.85; }
+	}
+
+	main {
+		max-width: 580px;
+		margin: 0 auto;
+		position: relative;
+		z-index: 2;
+	}
+
+	/* ---------- Hero ---------- */
+	.hero {
 		text-align: center;
-		font-size: 28px;
-		font-weight: 700;
-		margin: 0 0 36px;
-		letter-spacing: 0.5px;
+		margin: 0 0 44px;
 	}
+	.hero-title {
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 10px;
+	}
+	.hero-zh {
+		font-size: clamp(56px, 13vw, 92px);
+		font-weight: 800;
+		letter-spacing: -0.02em;
+		line-height: 1;
+		background: linear-gradient(135deg, var(--accent-1) 0%, var(--accent-2) 35%, var(--accent-3) 70%, var(--accent-1) 100%);
+		background-size: 250% 250%;
+		-webkit-background-clip: text;
+		background-clip: text;
+		color: transparent;
+		filter: drop-shadow(0 8px 32px rgba(160, 120, 255, 0.32));
+		animation: heroFlow 12s linear infinite;
+	}
+	@keyframes heroFlow {
+		0%   { background-position: 0% 50%; }
+		100% { background-position: 250% 50%; }
+	}
+	.hero-en {
+		font-family: "SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+		font-size: clamp(13px, 2.4vw, 16px);
+		font-weight: 600;
+		letter-spacing: 0.5em;
+		text-indent: 0.5em;
+		text-transform: uppercase;
+		color: rgba(255, 255, 255, 0.72);
+	}
+	.hero-tagline {
+		margin: 22px 0 0;
+		font-size: 14px;
+		color: var(--muted);
+		letter-spacing: 0.06em;
+	}
+
+	/* ---------- Card ---------- */
 	.card {
+		position: relative;
 		background: var(--card-bg);
 		border: 1px solid var(--card-border);
-		border-radius: 14px;
+		border-radius: 16px;
 		padding: 22px 24px;
 		margin-bottom: 14px;
-		backdrop-filter: blur(8px);
+		backdrop-filter: blur(14px);
+		-webkit-backdrop-filter: blur(14px);
+		overflow: hidden;
+		transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+		transform-style: preserve-3d;
+		transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1), border-color 220ms ease, box-shadow 220ms ease;
+		will-change: transform;
 	}
-	.step-title {
+	.card:hover {
+		border-color: var(--card-border-hover);
+		box-shadow: 0 18px 48px -16px rgba(120, 90, 255, 0.35);
+	}
+	.card::before {
+		content: "";
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		background: radial-gradient(circle 280px at var(--card-mx, 50%) var(--card-my, 50%),
+			rgba(255, 255, 255, 0.10), transparent 60%);
+		opacity: 0;
+		transition: opacity 250ms ease;
+	}
+	.card:hover::before { opacity: 1; }
+	.card::after {
+		content: "";
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 30%);
+	}
+	.card > * { position: relative; z-index: 1; }
+
+	/* ---------- Step ---------- */
+	.step-head {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 10px;
+		margin: 0 0 16px;
+	}
+	.step-badge {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 50%;
+		background: linear-gradient(135deg, rgba(120, 100, 255, 0.6), rgba(80, 160, 255, 0.6));
+		border: 1px solid rgba(255, 255, 255, 0.22);
+		font-size: 12px;
+		font-weight: 700;
+		color: rgba(255, 255, 255, 0.96);
+		font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16),
+		            0 0 0 0 rgba(120, 100, 255, 0.45);
+		animation: badgePulse 2.6s ease-out infinite;
+	}
+	@keyframes badgePulse {
+		0%   { box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 0 0 0 rgba(120, 100, 255, 0.45); }
+		70%  { box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 0 0 8px rgba(120, 100, 255, 0); }
+		100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 0 0 0 rgba(120, 100, 255, 0); }
+	}
+	.step-text {
 		font-size: 15px;
 		font-weight: 600;
-		margin: 0 0 14px;
-		text-align: center;
+		color: rgba(255, 255, 255, 0.92);
 	}
-	.step-num { color: rgba(180, 200, 255, 0.85); }
+
+	/* ---------- Row ---------- */
 	.row {
 		display: flex;
 		align-items: center;
@@ -59,62 +198,91 @@
 	}
 	kbd {
 		display: inline-block;
-		padding: 5px 11px;
-		background: rgba(0, 0, 0, 0.3);
-		border: 1px solid rgba(255, 255, 255, 0.18);
+		padding: 6px 12px;
+		background: rgba(0, 0, 0, 0.32);
+		border: 1px solid rgba(255, 255, 255, 0.16);
 		border-radius: 6px;
 		font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
 		font-size: 13px;
-		color: rgba(255, 255, 255, 0.9);
+		color: rgba(255, 255, 255, 0.92);
+		box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.25);
 	}
 	.kb-or { color: var(--muted); font-size: 13px; }
+
+	/* ---------- Source select ---------- */
 	.source-select {
-		padding: 8px 12px;
-		background: rgba(0, 0, 0, 0.3);
+		padding: 9px 12px;
+		background: rgba(0, 0, 0, 0.32);
 		color: white;
 		border: 1px solid rgba(255, 255, 255, 0.18);
-		border-radius: 6px;
+		border-radius: 8px;
 		font-family: inherit;
 		font-size: 13px;
 		outline: none;
 		cursor: pointer;
+		transition: border-color 200ms ease;
 	}
+	.source-select:hover { border-color: rgba(255, 255, 255, 0.32); }
+	.source-select:focus-visible { border-color: var(--accent-2); }
+
+	/* ---------- Bookmarklet button (with shimmer sweep) ---------- */
 	.pa-btn {
+		position: relative;
 		display: inline-flex;
 		align-items: center;
-		gap: 6px;
-		padding: 9px 18px;
-		background: linear-gradient(135deg, #3a8fff, #6a4dff);
+		gap: 7px;
+		padding: 10px 20px;
+		background: linear-gradient(135deg, #3a8fff 0%, #6a4dff 60%, #ad4dff 100%);
 		color: white !important;
 		text-decoration: none;
-		border-radius: 8px;
+		border-radius: 9px;
 		font-weight: 600;
 		font-size: 14px;
 		box-shadow:
-			0 4px 16px rgba(58, 143, 255, 0.4),
-			inset 0 1px 0 rgba(255, 255, 255, 0.15);
+			0 6px 20px rgba(106, 77, 255, 0.42),
+			inset 0 1px 0 rgba(255, 255, 255, 0.18);
 		cursor: grab;
 		user-select: none;
+		overflow: hidden;
+		transition: filter 150ms ease, transform 150ms ease, box-shadow 150ms ease;
 	}
-	.pa-btn:active { cursor: grabbing; }
-	.pa-btn:hover { filter: brightness(1.12); }
+	.pa-btn::after {
+		content: "";
+		position: absolute;
+		inset: 0;
+		background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.42) 50%, transparent 70%);
+		transform: translateX(-100%);
+		transition: transform 700ms ease;
+		pointer-events: none;
+	}
+	.pa-btn:hover::after { transform: translateX(100%); }
+	.pa-btn > * { position: relative; z-index: 1; }
+	.pa-btn:active { cursor: grabbing; transform: translateY(1px); }
+	.pa-btn:hover {
+		filter: brightness(1.12);
+		box-shadow:
+			0 10px 32px rgba(106, 77, 255, 0.6),
+			inset 0 1px 0 rgba(255, 255, 255, 0.2);
+	}
 	.hint {
-		margin-top: 8px;
+		margin-top: 10px;
 		text-align: center;
 		font-size: 12px;
 		color: var(--muted);
 	}
+
+	/* ---------- Note ---------- */
 	.note {
 		margin-top: 28px;
 		padding: 16px 18px;
 		background: rgba(255, 200, 80, 0.05);
 		border: 1px solid rgba(255, 200, 80, 0.18);
-		border-radius: 10px;
+		border-radius: 12px;
 		color: var(--muted);
 		font-size: 13px;
 		line-height: 1.7;
 	}
-	.note strong { color: rgba(255, 220, 140, 0.9); }
+	.note strong { color: rgba(255, 220, 140, 0.92); }
 	.note code {
 		background: rgba(0, 0, 0, 0.35);
 		padding: 2px 6px;
@@ -123,21 +291,23 @@
 		font-size: 12px;
 		color: #ffd699;
 	}
-	.changelog {
-		margin-top: 28px;
-	}
+
+	/* ---------- Changelog ---------- */
+	.changelog { margin-top: 36px; }
 	.changelog-title {
-		font-size: 14px;
+		font-size: 12px;
 		font-weight: 600;
 		color: rgba(180, 200, 255, 0.85);
-		margin: 0 0 14px;
+		margin: 0 0 18px;
 		text-align: center;
-		letter-spacing: 0.5px;
+		letter-spacing: 0.4em;
+		text-indent: 0.4em;
+		text-transform: uppercase;
 	}
 	.changelog-day {
 		padding: 12px 16px;
-		border-left: 2px solid rgba(120, 140, 220, 0.35);
-		margin-bottom: 12px;
+		border-left: 2px solid rgba(120, 140, 220, 0.4);
+		margin-bottom: 14px;
 	}
 	.changelog-day + .changelog-day { margin-top: 0; }
 	.changelog-date {
@@ -154,14 +324,59 @@
 		line-height: 1.7;
 	}
 	.changelog-list li { margin: 0; }
+
+	/* ---------- Entry animations ---------- */
+	@keyframes fadeUp {
+		from { opacity: 0; transform: translateY(16px); }
+		to   { opacity: 1; transform: translateY(0); }
+	}
+	@keyframes fadeIn {
+		from { opacity: 0; }
+		to   { opacity: 1; }
+	}
+	.hero, .note, .changelog {
+		animation: fadeUp 700ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+	}
+	.card {
+		/* card has its own 3D transform — only fade in to avoid transform conflict */
+		animation: fadeIn 700ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+	}
+	.hero { animation-delay: 0ms; }
+	main > .card:nth-of-type(1) { animation-delay: 100ms; }
+	main > .card:nth-of-type(2) { animation-delay: 200ms; }
+	main > .card:nth-of-type(3) { animation-delay: 300ms; }
+	.note      { animation-delay: 400ms; }
+	.changelog { animation-delay: 500ms; }
+
+	/* ---------- Reduced motion ---------- */
+	@media (prefers-reduced-motion: reduce) {
+		*, *::before, *::after {
+			animation: none !important;
+			transition: none !important;
+		}
+		.card { transform: none !important; }
+		.layer { display: none; }
+	}
 </style>
 </head>
 <body>
+<div class="layer layer-aurora" aria-hidden="true"></div>
+<div class="layer layer-spotlight" aria-hidden="true"></div>
+
 <main>
-	<h1>安装 Web Agent</h1>
+	<header class="hero">
+		<h1 class="hero-title">
+			<span class="hero-zh">淘未来</span>
+			<span class="hero-en">Web Agent</span>
+		</h1>
+		<p class="hero-tagline">让 AI 替你淘每一个网页</p>
+	</header>
 
 	<section class="card">
-		<div class="step-title"><span class="step-num">步骤 1：</span>显示收藏夹栏</div>
+		<div class="step-head">
+			<span class="step-badge">1</span>
+			<span class="step-text">显示收藏夹栏</span>
+		</div>
 		<div class="row">
 			<kbd>Ctrl + Shift + B</kbd>
 			<span class="kb-or">或</span>
@@ -170,7 +385,10 @@
 	</section>
 
 	<section class="card">
-		<div class="step-title"><span class="step-num">步骤 2：</span>拖拽下面按钮到收藏夹栏</div>
+		<div class="step-head">
+			<span class="step-badge">2</span>
+			<span class="step-text">拖拽下面按钮到收藏夹栏</span>
+		</div>
 		<div class="row">
 			<select class="source-select" id="source">
 				<option value="prod" selected>生产 (prod)</option>
@@ -185,7 +403,10 @@
 	</section>
 
 	<section class="card">
-		<div class="step-title"><span class="step-num">步骤 3：</span>在其他网站点击收藏夹中的按钮即可使用</div>
+		<div class="step-head">
+			<span class="step-badge">3</span>
+			<span class="step-text">在其他网站点击收藏夹中的按钮即可使用</span>
+		</div>
 	</section>
 
 	<p class="note">
@@ -271,6 +492,42 @@
 	});
 
 	update();
+
+	// ---------- Mouse-driven flair ----------
+	const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	if (!reducedMotion) {
+		// 1) Page-wide ambient spotlight follows the cursor.
+		document.addEventListener('pointermove', (e) => {
+			document.body.style.setProperty('--mx', e.clientX + 'px');
+			document.body.style.setProperty('--my', e.clientY + 'px');
+		}, { passive: true });
+
+		// 2) Per-card spotlight + 3D parallax tilt.
+		document.querySelectorAll('.card').forEach((card) => {
+			let rect = null;
+			card.addEventListener('pointerenter', () => {
+				rect = card.getBoundingClientRect();
+			});
+			card.addEventListener('pointermove', (e) => {
+				if (!rect) rect = card.getBoundingClientRect();
+				const x = e.clientX - rect.left;
+				const y = e.clientY - rect.top;
+				const cx = rect.width / 2;
+				const cy = rect.height / 2;
+				const rx = ((y - cy) / cy) * -3;  // tilt up to ±3deg
+				const ry = ((x - cx) / cx) *  3;
+				card.style.setProperty('--card-mx', x + 'px');
+				card.style.setProperty('--card-my', y + 'px');
+				card.style.setProperty('--rx', rx + 'deg');
+				card.style.setProperty('--ry', ry + 'deg');
+			}, { passive: true });
+			card.addEventListener('pointerleave', () => {
+				card.style.setProperty('--rx', '0deg');
+				card.style.setProperty('--ry', '0deg');
+				rect = null;
+			});
+		});
+	}
 </script>
 </body>
 </html>
