@@ -17,7 +17,7 @@
 //    在 https 站点上使用 bookmarklet:
 javascript:(function(){var s=document.createElement('script');s.src=`https://localhost:5174/page-agent.demo.js?t=${Math.random()}`;s.onload=()=>console.log('PageAgent demo ready!');document.head.appendChild(s);})();
 
-// 2. 点击面板头部的 🤖 → 在弹出框中选择 "PDD 批量暂停"
+// 2. 点击面板头部的 🤖 → 在弹出框中选择 "PDD 批量推广001"
 //    或者从控制台直接运行：
 window.runScriptedFlow(window.scriptedFlowPresets.pddPromotion)
 
@@ -85,6 +85,10 @@ flowchart TD
 
 ## 单行流程
 
+冷却倒计时**从 click1 的"开启成功"toast 起算**（T0），随后的"随机间隔 + click2 + 等弹窗"
+都跟它**并行**消耗时间，弹窗出现后只补等剩余的那点。HUD 的 aux 行独立 ticker 显示倒计时，
+status 行同步显示当前操作。
+
 ```mermaid
 flowchart TD
     Start([单行]) --> Read[读取开关状态]
@@ -94,24 +98,33 @@ flowchart TD
 
     AttemptStart --> StartedOpen{startedOpen?}
     StartedOpen -- false<br/>初次 --> Click1[点开关 → 开启]
-    Click1 --> Wait1[等 1s]
-    Wait1 --> Click2[点开关 → 触发 Popconfirm]
-    StartedOpen -- true<br/>重试 --> Click2
-    Click2 --> WaitPopup[等待弹窗 ≤5s]
-    WaitPopup --> SkipCD{skipCountdown?}
-    SkipCD -- false<br/>初次 --> Countdown[倒计时 25–28s<br/>HUD 每秒更新]
-    SkipCD -- true<br/>重试 --> WaitBtn
-    Countdown --> WaitBtn[等按钮可点 ≤5s]
+    StartedOpen -- true<br/>重试 --> Click2[点开关 → 触发 Popconfirm]
+
+    Click1 --> WaitToast[等 activationSuccess toast<br/>≤ activationTimeoutMs]
+    WaitToast -. toast 命中 .-> SetT0[T0 = 现在<br/>cooldownDeadline = T0 + beforeConfirm]
+    WaitToast -. 超时无 toast .-> SetT0Fb[T0 = click1 时刻<br/>console.warn]
+    SetT0 --> StartTicker[启动 HUD aux ticker<br/>每 250ms 显示剩余]
+    SetT0Fb --> StartTicker
+    StartTicker --> Random[随机等 betweenToggleClicksRandomMs<br/>例: 3000–5000]
+    Random --> Click2
+
+    Click2 --> WaitPopup[等待弹窗 ≤ popup.timeoutMs]
+    WaitPopup --> SkipCD{cooldownDeadline?}
+    SkipCD -- null<br/>重试 --> WaitBtn
+    SkipCD -- 有 --> Remaining{remaining<br/>= deadline − now}
+    Remaining -- &gt; 0 --> WaitRem[补等 remaining<br/>仍守护 popup 是否还在]
+    Remaining -- ≤ 0 --> WaitBtn
+    WaitRem --> WaitBtn[等按钮可点 ≤5s]
     WaitBtn --> Snapshot[快照已有 toast]
     Snapshot --> ClickConfirm[点击 确定暂停]
     ClickConfirm --> Verify{验证 toast}
 
     Verify -- 命中 success 正则 --> Ok[成功<br/>+ 600ms 缓冲窗口]
     Verify -- 命中 failure 正则 --> Failed[失败]
-    Verify -- 3s 超时 --> Failed
+    Verify -- timeoutMs 超时 --> Failed
 
-    Ok --> Succeeded[rowsActioned++<br/>清掉本行 HUD 错误项]
-    Failed --> UpdateHUD[覆盖本行的 HUD 错误项]
+    Ok --> Succeeded[rowsActioned++<br/>清 HUD 错误项 + 清 aux ticker]
+    Failed --> UpdateHUD[覆盖 HUD 错误项 + 清 aux ticker]
     UpdateHUD --> RetriesLeft{还有重试?}
 
     RetriesLeft -- 有 --> Backoff[退避等待<br/>1s / 2s / 4s]
@@ -139,13 +152,35 @@ CLOSED→OPEN 切换了，但第二次点击和确认被拒，所以"关掉"这�
 重试时因此**跳过初次激活步骤**：开关已经 OPEN，再点一次就能直接触发暂停
 Popconfirm。
 
-### 重试跳过指定的倒计时
+### 重试跳过冷却倒计时
 
-`delays.beforeConfirm` 倒计时（默认 28s，可在弹出框输入框中按流程修改 ——
-最近一次值会持久化到 localStorage）只在初次尝试运行。重试依赖
-`等按钮可点 (≤5s)` 这个安全网清掉 PDD 的反刷限制。如果 PDD 强制了"每次重开
-弹窗 30s 锁定"，这一步会超时让本次重试快速失败 —— 下一轮更长的退避（1s → 2s
-→ 4s）会给限流窗口足够的过期时间。
+`delays.beforeConfirm` 服务端冷却（默认 30s，可在弹出框输入框中按流程修改 ——
+最近一次值会持久化到 localStorage）只在初次尝试期间挂 ticker + 在弹窗后补等。
+重试因为没有重新 click1，本身就过了冷却窗口；只依赖 `等按钮可点 (≤5s)`
+这个安全网清掉 PDD 的反刷限制。如果 PDD 强制了"每次重开弹窗 N 秒锁定"，
+这一步会超时让本次重试快速失败 —— 下一轮更长的退避（1s → 2s → 4s）会给
+限流窗口足够的过期时间。
+
+### 每行冷却时间随机抖动
+
+`delays.beforeConfirmJitterMs`（默认 0；PDD preset 给的是 800）会在每行进入冷却
+之前生成一个 `[0, beforeConfirmJitterMs)` 的随机毫秒数加到 `beforeConfirm` 上。
+比如设 30000 + 抖动 800，实际每行的冷却是 30.0–30.8s 之间均匀随机。
+
+**作用范围**：每行一次（不是每次重试一次），retry 路径本身就跳过整个冷却区段。
+**目的**：避免每行都精准卡 30.0s 这种机器节拍；console 会 log 实际抖动值方便排查。
+**关闭方式**：preset 里去掉这个字段或设为 0。
+
+### activation toast 没出现的兜底
+
+`verify.activationSuccess` 配了正则但 `activationTimeoutMs`（默认 3s）内没观察到
+匹配的 toast 时，runner **不抛错**：把 T0 回退到约等于 click1 的时刻
+（`Date.now() − activationTimeoutMs`），同时在 console.warn 一行
+`activation toast not seen ... — falling back to click-dispatch timestamp as T0`。
+
+理由：toast 是可观测信号，不是真值来源。click1 是否真的开启了，下一步
+"等弹窗"会给出权威信号 —— 如果 click1 没生效，弹窗根本不会出现，runner
+会在 `popup.timeoutMs`（默认 5s）后抛错进入重试。
 
 ---
 
@@ -263,12 +298,16 @@ Toast 扫描默认覆盖常见组件根：
 
 左上角，固定定位，半透明深色面板，等宽字体。从上到下依次：
 
-| 区段     | 内容                                                            |
-| -------- | --------------------------------------------------------------- |
-| 标题     | `🤖 Scripted Flow  📄 第 N / M 页  🔘 第 i / N 行`              |
-| 状态     | 实时：`🖱 第 1 次点击开关`、`⏳ 倒计时：剩余 14s`、`✅ 已暂停`…   |
-| 统计     | `✓ 已暂停 N  ⏭ 已开/无开关 M  ✗ 失败 K`                          |
-| 错误列表 | 每行一条，按 (页, 行) 维度只保留最新状态                        |
+| 区段     | 内容                                                                              |
+| -------- | --------------------------------------------------------------------------------- |
+| 标题     | `🤖 Scripted Flow  📄 第 N / M 页  🔘 第 i / N 行`                                |
+| 状态     | 当前操作：`🖱 第 1 次点击开关`、`⏳ 等启动反馈…`、`🖱 第 2 次点击开关`、`✅ 已暂停`… |
+| **Aux**  | 独立 ticker：`⏳ 服务端冷却剩余 24s` → 23s → … → `✓ 服务端冷却完成`（仅初次尝试有） |
+| 统计     | `✓ 已暂停 N  ⏭ 已开/无开关 M  ✗ 失败 K`                                            |
+| 错误列表 | 每行一条，按 (页, 行) 维度只保留最新状态                                          |
+
+aux 行从 click1 → activation toast 命中（或超时回退）那一刻开始，每 250ms 重写。
+重试路径不挂 ticker，aux 行始终为空。`finally` 块保证无论成败，aux 都会被清空。
 
 错误列表在第一次出错前是隐藏的，超过部分内部滚动，最大约 `38vh`。HUD 设置了
 `pointer-events: none`，叠在遮罩之上，并通过 `data-page-agent-ignore` 让自己
@@ -292,14 +331,20 @@ export const pddPromotionPreset: ScriptedFlowConfig = {
             success: /(暂停|开启|操作)成功/,
             failure: /操作频繁|请稍后|...|拒绝/,
             timeoutMs: 3000,
+            // click1 之后等这条 toast 落地 → 锚定 T0；超时回退到 click1 时刻
+            activationSuccess: /(开启|启动|启用)成功/,
+            activationTimeoutMs: 3000,
         },
     },
     nextPage: {
         selector: '.anq-pagination-next',
     },
     delays: {
-        betweenToggleClicks: 1000,
-        beforeConfirm: 28000,
+        // 随机 3–5s（与冷却 ticker 并行，不会拖长总时间）
+        betweenToggleClicksRandomMs: [3000, 5000],
+        beforeConfirm: 30000,
+        // 每行额外随机加 0–800ms（实际冷却 30.0–30.8s 之间），让 PDD 看不出固定节拍
+        beforeConfirmJitterMs: 800,
         afterPageChange: 1500,
     },
     enableMask: true,
@@ -327,7 +372,7 @@ export const pddPromotionPreset: ScriptedFlowConfig = {
 清掉某流程持久化的倒计时：
 
 ```js
-localStorage.removeItem('page-agent:scripted-flow:countdown:PDD 批量暂停')
+localStorage.removeItem('page-agent:scripted-flow:countdown:PDD 批量推广001')
 ```
 
 ---
@@ -346,7 +391,7 @@ import {
 
 const items: ScriptedFlowItem[] = [
     {
-        name: 'PDD 批量暂停',
+        name: 'PDD 批量推广001',
         description: '拼多多推广列表 / 翻完全部页 / 暂停所有未开启行',
         preset: pddPromotionPreset,
     },
@@ -382,19 +427,27 @@ injectScriptedFlowButton({ items })
 
 ## 单行时间预算（最坏情况）
 
-| 阶段                          | 初次尝试        | 重试尝试               |
-| ----------------------------- | --------------- | ---------------------- |
-| 点击 + 1s + 点击              | 约 1.5s         | 约 0.5s（单次点击）    |
-| 等弹窗                        | ≤ 5s            | ≤ 5s                   |
-| 倒计时                        | 25–28s          | **跳过**               |
-| 等按钮可点                    | ≤ 5s            | ≤ 5s                   |
-| 点确认 + 验证 toast           | 约 3.5s         | 约 3.5s                |
-| afterRow                      | 1s              | 1s                     |
-| **小计**                      | **约 31s**      | **约 10s**             |
-| 该次尝试前的退避              | 0               | 1 / 2 / 4s             |
+冷却 30s 是从 click1 toast 起算的"墙钟"。其他步骤会**吸收**它的一部分，
+所以总时间 ≈ `max(冷却, 实际串行步骤)` + 等按钮 + 验证 + afterRow。
 
-最坏情况：单行失败 4 次 ≈ 31 + 1 + 10 + 2 + 10 + 4 + 10 ≈ 68s。
-全成功跑一遍：5 行/页 × 28 页 × 约 31s ≈ 72 分钟。
+| 阶段                                 | 初次尝试                | 重试尝试               |
+| ------------------------------------ | ----------------------- | ---------------------- |
+| click1 + 等 activation toast         | 约 0.5s + ≤ 3s          | —                      |
+| 随机间隔 (`betweenToggleClicksRandomMs`) | 3–5s（被冷却吸收）   | —                      |
+| click2                               | 约 0.5s（被冷却吸收）  | 约 0.5s                |
+| 等弹窗                               | ≤ 5s（被冷却吸收）     | ≤ 5s                   |
+| 等冷却归零（剩余）                   | ≈ 30s − 上面已耗费     | **跳过**               |
+| 等按钮可点                           | ≤ 5s                    | ≤ 5s                   |
+| 点确认 + 验证 toast                  | 约 3.5s                 | 约 3.5s                |
+| afterRow                             | 1s                      | 1s                     |
+| **小计**                             | **约 30 + 9.5 ≈ 40s**   | **约 13s**             |
+| 该次尝试前的退避                     | 0                       | 1 / 2 / 4s             |
+
+> 对比改造前（28s 倒计时**等弹窗后才开始**）的约 42s，改造后约 40s，
+> 但**节奏更像人**（随机 3–5s）+ **冷却起点真正对齐 PDD 服务端**。
+
+最坏情况：单行失败 4 次 ≈ 40 + 1 + 13 + 2 + 13 + 4 + 13 ≈ 86s。
+全成功跑一遍：5 行/页 × 28 页 × 约 40s ≈ 93 分钟。
 
 ---
 

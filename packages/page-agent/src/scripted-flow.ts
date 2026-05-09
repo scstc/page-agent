@@ -58,6 +58,18 @@ export interface ScriptedFlowConfig {
 			scanSelector?: string
 			/** Max wait for a verdict, in ms. Default: 3000. */
 			timeoutMs?: number
+			/**
+			 * Regex matching the toast that confirms the FIRST click (activation)
+			 * actually took effect server-side, e.g. /开启成功|启动成功/. When set,
+			 * the cooldown countdown (`delays.beforeConfirm`) is anchored at the
+			 * moment this toast appears (T0) instead of at click-dispatch time —
+			 * so the random pre-click2 wait + popup-wait overlap with the cooldown
+			 * instead of stacking on top of it. If not seen within
+			 * `activationTimeoutMs`, T0 falls back to ~click1 dispatch time.
+			 */
+			activationSuccess?: RegExp
+			/** Max wait for activationSuccess, in ms. Default: 3000. */
+			activationTimeoutMs?: number
 		}
 	}
 
@@ -87,14 +99,29 @@ export interface ScriptedFlowConfig {
 	}
 
 	delays?: {
-		/** Wait after the FIRST click on the toggle. Default: 1000. */
+		/** Fixed wait between click1 and click2. Default: 1000. Ignored when `betweenToggleClicksRandomMs` is set. */
 		betweenToggleClicks?: number
 		/**
-		 * Expected confirm-button countdown duration. We sleep this long, ticking the
-		 * HUD with remaining seconds, then briefly wait for the button to be actually
-		 * clickable. Default: 28000.
+		 * `[minMs, maxMs]` for a uniform-random wait between click1 and click2.
+		 * When set, overrides `betweenToggleClicks`. Useful for human-like pacing
+		 * to avoid anti-bot heuristics (PDD shows hand-tuned ~3–5s gaps). Default: unset.
+		 */
+		betweenToggleClicksRandomMs?: [number, number]
+		/**
+		 * Server-side cooldown duration after click1 before the confirm button is
+		 * accepted. Anchored at the activation-toast moment (T0) when
+		 * `verify.activationSuccess` is configured, otherwise at click1 dispatch.
+		 * The HUD shows a live ticker on a dedicated aux line; the runner waits
+		 * for whatever portion remains after popup appears. Default: 28000.
 		 */
 		beforeConfirm?: number
+		/**
+		 * Per-row uniform-random jitter added on top of `beforeConfirm`, in ms.
+		 * Each row picks a fresh value in `[0, beforeConfirmJitterMs]`, so the
+		 * actual cooldown is `beforeConfirm + jitter`. Used to make timings less
+		 * machine-uniform (anti-bot heuristics). Default: 0 (no jitter).
+		 */
+		beforeConfirmJitterMs?: number
 		/** Pause AFTER each row's pause flow finishes (success or failure). Default: 1000. */
 		afterRow?: number
 		/** Wait after clicking next-page, before scanning rows again. Default: 1500. */
@@ -161,7 +188,9 @@ interface ResolvedConfig {
 	}
 	delays: {
 		betweenToggleClicks: number
+		betweenToggleClicksRandomMs: [number, number] | null
 		beforeConfirm: number
+		beforeConfirmJitterMs: number
 		afterRow: number
 		afterPageChange: number
 	}
@@ -273,7 +302,9 @@ function resolveConfig(c: ScriptedFlowConfig): ResolvedConfig {
 		},
 		delays: {
 			betweenToggleClicks: c.delays?.betweenToggleClicks ?? 1000,
+			betweenToggleClicksRandomMs: c.delays?.betweenToggleClicksRandomMs ?? null,
 			beforeConfirm: c.delays?.beforeConfirm ?? 28000,
+			beforeConfirmJitterMs: Math.max(0, Math.floor(c.delays?.beforeConfirmJitterMs ?? 0)),
 			afterRow: c.delays?.afterRow ?? 1000,
 			afterPageChange: c.delays?.afterPageChange ?? 1500,
 		},
@@ -578,6 +609,99 @@ function waitForToastResult(
 	})
 }
 
+/**
+ * Snapshot toasts whose text already matches a single pattern. Used by the
+ * activation-toast wait so a leftover "开启成功" from the previous row doesn't
+ * latch onto this row's T0.
+ */
+function snapshotToastsMatching(pattern: RegExp, scanSelector?: string): Set<HTMLElement> {
+	const stale = new Set<HTMLElement>()
+	const candidates = document.querySelectorAll<HTMLElement>(
+		scanSelector ?? TOAST_CANDIDATE_SELECTOR
+	)
+	for (const el of candidates) {
+		if (!isVisible(el)) continue
+		const text = (el.textContent || '').trim()
+		if (!text) continue
+		if (pattern.test(text)) stale.add(el)
+	}
+	return stale
+}
+
+/**
+ * Watch for the first NEW toast matching `pattern`. Resolves with the timestamp
+ * (`Date.now()`) when the match is observed. On timeout, resolves to a fallback
+ * timestamp = `now − timeoutMs` (an approximation of "click1 dispatch time"),
+ * so the cooldown ticker still starts and the row doesn't fail just because
+ * the activation toast was missed. The caller is expected to log a warning.
+ */
+function waitForActivationToast(
+	pattern: RegExp,
+	scanSelector: string,
+	stale: Set<HTMLElement>,
+	timeoutMs: number,
+	handle: AbortHandle
+): Promise<number> {
+	return new Promise<number>((resolve, reject) => {
+		let settled = false
+		let observer: MutationObserver | null = null
+		let pollId: ReturnType<typeof setInterval> | null = null
+		let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+		const cleanup = (): void => {
+			if (observer) observer.disconnect()
+			if (pollId !== null) clearInterval(pollId)
+			if (timeoutId !== null) clearTimeout(timeoutId)
+		}
+
+		const check = (): void => {
+			if (settled) return
+			if (handle.aborted) {
+				settled = true
+				cleanup()
+				reject(new AbortError())
+				return
+			}
+			const candidates = document.querySelectorAll<HTMLElement>(scanSelector)
+			for (const el of candidates) {
+				if (stale.has(el)) continue
+				if (!isVisible(el)) continue
+				const text = (el.textContent || '').trim()
+				if (!text || text.length > 200) continue
+				if (pattern.test(text)) {
+					settled = true
+					cleanup()
+					console.log(`[scripted-flow] activation toast matched: "${text}"`)
+					resolve(Date.now())
+					return
+				}
+			}
+		}
+
+		observer = new MutationObserver(check)
+		observer.observe(document.body, {
+			childList: true,
+			subtree: true,
+			characterData: true,
+		})
+		pollId = setInterval(check, 200)
+		timeoutId = setTimeout(() => {
+			if (settled) return
+			settled = true
+			cleanup()
+			console.warn(
+				`[scripted-flow] activation toast not seen in ${timeoutMs}ms — falling back to click-dispatch timestamp as T0`
+			)
+			resolve(Date.now() - timeoutMs)
+		}, timeoutMs)
+
+		setTimeout(check, 50)
+	})
+}
+
+const randomBetween = (min: number, max: number): number =>
+	Math.floor(min + Math.random() * Math.max(0, max - min))
+
 // ---------------------------------------------------------------------------
 // HUD overlay (top-left status panel)
 // ---------------------------------------------------------------------------
@@ -606,6 +730,12 @@ class FlowHUD {
 	private el: HTMLDivElement
 	private titleEl: HTMLDivElement
 	private statusEl: HTMLDivElement
+	/**
+	 * Optional secondary line below status, used for asynchronous tickers (e.g.
+	 * the cooldown countdown that runs in parallel with the click sequence).
+	 * Empty by default; doesn't reserve vertical space until populated.
+	 */
+	private auxEl: HTMLDivElement
 	private statsEl: HTMLDivElement
 	private errorsEl: HTMLDivElement
 	private errors: ErrorEntry[] = []
@@ -643,6 +773,9 @@ class FlowHUD {
 		this.statusEl = document.createElement('div')
 		this.statusEl.style.cssText = 'min-height:20px'
 
+		this.auxEl = document.createElement('div')
+		this.auxEl.style.cssText = 'margin-top:2px;font-size:12px;color:#a8c5ff;min-height:0'
+
 		this.statsEl = document.createElement('div')
 		this.statsEl.style.cssText =
 			'margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.1);font-size:11px;opacity:0.85'
@@ -653,8 +786,18 @@ class FlowHUD {
 		this.errorsEl.style.cssText =
 			'display:none;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,80,80,0.25);max-height:38vh;overflow-y:auto;font-size:11px;line-height:1.4'
 
-		this.el.append(this.titleEl, this.statusEl, this.statsEl, this.errorsEl)
+		this.el.append(this.titleEl, this.statusEl, this.auxEl, this.statsEl, this.errorsEl)
 		document.body.appendChild(this.el)
+	}
+
+	/** Set the secondary status line (HTML allowed for `<b>` highlights). */
+	setAux(html: string): void {
+		this.auxEl.innerHTML = html
+	}
+
+	/** Clear the secondary status line. Safe to call even when never set. */
+	clearAux(): void {
+		this.auxEl.innerHTML = ''
 	}
 
 	update(ctx: HUDContext, status: string, stats: HUDStats): void {
@@ -1008,107 +1151,177 @@ async function pauseRow(
 	stats: HUDStats
 ): Promise<void> {
 	const { log } = config
+	const verify = config.confirm.verify
 
 	if (config.dryRun) {
 		log(
 			(startedOpen
 				? '[dryRun] retry-from-OPEN: would click once, wait popup, '
-				: '[dryRun] would click toggle, wait, click again, wait popup, ') +
-				(skipCountdown ? '[skip countdown] ' : 'countdown, ') +
+				: '[dryRun] would click toggle, wait toast/random, click again, wait popup, ') +
+				(skipCountdown ? '[skip cooldown] ' : 'wait cooldown remainder, ') +
 				'click confirm, verify'
 		)
 		return
 	}
 
 	let liveToggle = toggle
+	// Cooldown anchor — non-null only on initial attempts where we actually
+	// activated the row. Retry attempts (startedOpen=true) and skipCountdown
+	// callers leave it null and the post-popup wait short-circuits.
+	let cooldownDeadline: number | null = null
+	let tickerId: ReturnType<typeof setInterval> | null = null
 
-	// CLOSED start: do the spec's "click ON, wait 1s" preamble before triggering popup.
-	// OPEN start (a retry path after rate-limit rejection): the row is already in OPEN
-	// state, so a single click directly triggers the pause popup.
-	if (!startedOpen) {
-		hud?.update(ctx, '🖱 第 1 次点击开关', stats)
+	try {
+		if (!startedOpen) {
+			// click1 — flips the row ON, which triggers PDD's server-side cooldown.
+			// Anchor T0 at the activation toast (when configured) so the random
+			// pre-click2 wait + popup wait overlap with the cooldown instead of
+			// stacking on top of it.
+			const activationStale = verify?.activationSuccess
+				? snapshotToastsMatching(verify.activationSuccess, verify.scanSelector)
+				: new Set<HTMLElement>()
+
+			hud?.update(ctx, '🖱 第 1 次点击开关', stats)
+			await clickElement(liveToggle)
+
+			let t0: number
+			if (verify?.activationSuccess && !skipCountdown) {
+				hud?.update(ctx, '⏳ 等待启动反馈…', stats)
+				t0 = await waitForActivationToast(
+					verify.activationSuccess,
+					verify.scanSelector ?? TOAST_CANDIDATE_SELECTOR,
+					activationStale,
+					verify.activationTimeoutMs ?? 3000,
+					handle
+				)
+			} else {
+				t0 = Date.now()
+			}
+
+			if (!skipCountdown) {
+				// Per-row jitter: makes timings less machine-uniform. Picked once
+				// per row so the same row's retries don't keep rolling new values
+				// (retries skip this block entirely anyway).
+				const jitter =
+					config.delays.beforeConfirmJitterMs > 0
+						? Math.floor(Math.random() * config.delays.beforeConfirmJitterMs)
+						: 0
+				cooldownDeadline = t0 + config.delays.beforeConfirm + jitter
+				if (jitter > 0) {
+					log(
+						`Cooldown for this row: ${config.delays.beforeConfirm}ms + ${jitter}ms jitter = ${config.delays.beforeConfirm + jitter}ms`
+					)
+				}
+				const deadline = cooldownDeadline
+				const tick = (): void => {
+					const remainMs = Math.max(0, deadline - Date.now())
+					if (remainMs > 0) {
+						const s = Math.ceil(remainMs / 1000)
+						hud?.setAux(`⏳ 服务端冷却剩余 <b>${s}</b>s`)
+					} else {
+						hud?.setAux('✓ 服务端冷却完成')
+					}
+				}
+				tick()
+				tickerId = setInterval(tick, 250)
+			}
+
+			const randomRange = config.delays.betweenToggleClicksRandomMs
+			const waitMs = randomRange
+				? randomBetween(randomRange[0], randomRange[1])
+				: config.delays.betweenToggleClicks
+			hud?.update(ctx, `⏳ 等 ${(waitMs / 1000).toFixed(1)}s 再点第二次`, stats)
+			await abortableSleep(waitMs, handle)
+			if (handle.aborted) throw new AbortError()
+
+			const refreshed = row.querySelector<HTMLElement>(config.toggleSelector)
+			if (refreshed && refreshed.isConnected) liveToggle = refreshed
+		} else {
+			log('Row is OPEN — skipping initial activation step (retry from previous failure)')
+		}
+
+		// Click that triggers the Popconfirm. From CLOSED-start this is the 2nd click;
+		// from OPEN-start (retry) this is the only click.
+		hud?.update(ctx, startedOpen ? '🖱 点击开关触发弹窗' : '🖱 第 2 次点击开关', stats)
 		await clickElement(liveToggle)
 
-		hud?.update(ctx, '⏳ 等待 1 秒', stats)
-		await abortableSleep(config.delays.betweenToggleClicks, handle)
-		if (handle.aborted) throw new AbortError()
+		hud?.update(ctx, '⏳ 等待弹窗出现', stats)
+		const popup = await waitFor<HTMLElement>(
+			() => {
+				const candidates = document.querySelectorAll<HTMLElement>(config.popup.selector)
+				for (const el of candidates) if (isVisible(el)) return el
+				return null
+			},
+			config.popup.timeoutMs,
+			handle
+		)
+		log('Popup appeared')
 
-		const refreshed = row.querySelector<HTMLElement>(config.toggleSelector)
-		if (refreshed && refreshed.isConnected) liveToggle = refreshed
-	} else {
-		log('Row is OPEN — skipping initial activation step (retry from previous failure)')
-	}
-
-	// Click that triggers the Popconfirm. From CLOSED-start this is the 2nd click;
-	// from OPEN-start (retry) this is the only click.
-	hud?.update(ctx, startedOpen ? '🖱 点击开关触发弹窗' : '🖱 第 2 次点击开关', stats)
-	await clickElement(liveToggle)
-
-	hud?.update(ctx, '⏳ 等待弹窗出现', stats)
-	const popup = await waitFor<HTMLElement>(
-		() => {
-			const candidates = document.querySelectorAll<HTMLElement>(config.popup.selector)
-			for (const el of candidates) if (isVisible(el)) return el
-			return null
-		},
-		config.popup.timeoutMs,
-		handle
-	)
-	log('Popup appeared')
-
-	if (!skipCountdown) {
-		await sleepWithCountdown(config.delays.beforeConfirm, '倒计时', popup, hud, ctx, stats, handle)
-	} else {
-		log('Retry attempt — skipping the popup countdown wait')
-	}
-
-	hud?.update(ctx, '⏳ 等待按钮就绪…', stats)
-	const confirmBtn = await waitFor<HTMLElement>(
-		() => {
-			const btn = findCurrentConfirmButton(popup, config)
-			return btn && isConfirmReady(btn, config) ? btn : null
-		},
-		5000,
-		handle
-	)
-	log('Confirm button ready, clicking')
-
-	// Snapshot any pre-existing matching toasts BEFORE the click so we don't
-	// latch onto leftover messages from the previous row.
-	const verify = config.confirm.verify
-	const stale = verify ? snapshotMatchingToasts(verify) : null
-
-	hud?.update(ctx, '🖱 点击「确定暂停」', stats)
-	await clickElement(confirmBtn)
-
-	if (verify && stale) {
-		hud?.update(ctx, '⏳ 等待结果反馈…', stats)
-		const result = await waitForToastResult(verify, stale, handle)
-		if (!result.ok) {
-			throw new Error(result.message)
+		// Wait for whatever cooldown remains. Common case: the random + click2 +
+		// popup-wait already consumed most of it; we just block briefly here.
+		// Fast-path skipped on retries (cooldownDeadline === null).
+		if (cooldownDeadline !== null) {
+			const remaining = cooldownDeadline - Date.now()
+			if (remaining > 0) {
+				const s = Math.ceil(remaining / 1000)
+				hud?.update(ctx, `⏳ 等冷却归零（剩余 <b>${s}</b>s）`, stats)
+				await sleepUntilDeadline(cooldownDeadline, popup, handle)
+			} else {
+				log(`Cooldown already elapsed by ${-remaining}ms when popup appeared`)
+			}
 		}
-		log(`Confirm verified: ${result.message}`)
+
+		hud?.update(ctx, '⏳ 等待按钮就绪…', stats)
+		const confirmBtn = await waitFor<HTMLElement>(
+			() => {
+				const btn = findCurrentConfirmButton(popup, config)
+				return btn && isConfirmReady(btn, config) ? btn : null
+			},
+			5000,
+			handle
+		)
+		log('Confirm button ready, clicking')
+
+		// Snapshot any pre-existing matching toasts BEFORE the click so we don't
+		// latch onto leftover messages from the previous row.
+		const stale = verify ? snapshotMatchingToasts(verify) : null
+
+		hud?.update(ctx, '🖱 点击「确定暂停」', stats)
+		await clickElement(confirmBtn)
+
+		if (verify && stale) {
+			hud?.update(ctx, '⏳ 等待结果反馈…', stats)
+			const result = await waitForToastResult(verify, stale, handle)
+			if (!result.ok) {
+				throw new Error(result.message)
+			}
+			log(`Confirm verified: ${result.message}`)
+		}
+	} finally {
+		if (tickerId !== null) clearInterval(tickerId)
+		hud?.clearAux()
 	}
 }
 
-async function sleepWithCountdown(
-	ms: number,
-	label: string,
+/**
+ * Block until `deadlineMs` while the popup stays mounted. Throws AbortError on
+ * stop request, or a generic Error when the popup vanishes mid-wait (which
+ * means the user — or the page — closed our pause dialog and the run can no
+ * longer proceed). Polls every 250ms; the visible countdown is driven by a
+ * separate ticker on the HUD's aux line.
+ */
+async function sleepUntilDeadline(
+	deadlineMs: number,
 	popup: HTMLElement,
-	hud: FlowHUD | null,
-	ctx: HUDContext,
-	stats: HUDStats,
 	handle: AbortHandle
 ): Promise<void> {
-	const start = Date.now()
-	while (Date.now() - start < ms) {
+	while (Date.now() < deadlineMs) {
 		if (handle.aborted) throw new AbortError()
 		if (!popup.isConnected || !isVisible(popup)) {
-			throw new Error('Popup disappeared during countdown wait')
+			throw new Error('Popup disappeared during cooldown wait')
 		}
-		const remaining = Math.max(0, Math.ceil((ms - (Date.now() - start)) / 1000))
-		hud?.update(ctx, `⏳ ${label}：剩余 <b>${remaining}</b>s`, stats)
-		await sleep(250)
+		const remaining = deadlineMs - Date.now()
+		await sleep(Math.min(250, remaining))
 	}
 }
 
@@ -1157,14 +1370,24 @@ export const pddPromotionPreset: ScriptedFlowConfig = {
 			// (would cause false positives). `操作频繁` is the actual toast wording.
 			failure: /操作频繁|请稍后|请重试|请勿|频率|限流|太快|失败|错误|异常|不能|未能|无法|拒绝/,
 			timeoutMs: 3000,
+			// Activation toast = "开启成功" (sometimes "启动成功" / "启用成功" depending on PDD copy).
+			// We anchor the cooldown countdown at this toast so the random pre-click2 wait
+			// + popup wait overlap with the 30s server-side cooldown.
+			activationSuccess: /(开启|启动|启用)成功/,
+			activationTimeoutMs: 3000,
 		},
 	},
 	nextPage: {
 		selector: '.anq-pagination-next',
 	},
 	delays: {
-		betweenToggleClicks: 1000,
-		beforeConfirm: 28000,
+		// Human-like jitter between click1 and click2 to dodge anti-bot heuristics.
+		// Concurrent with the cooldown ticker, so it doesn't add to total runtime.
+		betweenToggleClicksRandomMs: [3000, 5000],
+		beforeConfirm: 30000,
+		// 0–800ms per-row jitter on top of beforeConfirm — actual cooldown is
+		// 30.0–30.8s, picked fresh for each row.
+		beforeConfirmJitterMs: 800,
 		afterPageChange: 1500,
 	},
 	enableMask: true,
@@ -1213,7 +1436,7 @@ function getDefaultItems(): ScriptedFlowItem[] {
 	const isZh = isZhLanguage()
 	return [
 		{
-			name: isZh ? 'PDD 批量暂停' : 'PDD batch pause',
+			name: isZh ? 'PDD 批量推广001' : 'PDD batch promotion 001',
 			description: isZh
 				? '拼多多推广列表 / 翻完全部页 / 暂停所有未开启行'
 				: 'Pinduoduo promotion list — paginate through all pages, pause every closed row',
