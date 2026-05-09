@@ -602,7 +602,7 @@
 
 <main>
 	<header class="hero">
-		<div class="hero-tag">系统在线 · 版本 V2026.04.30</div>
+		<div class="hero-tag">系统在线 · 版本 V2026.05.10</div>
 		<h1 class="hero-title">
 			<span class="hero-zh" data-text="淘未来">淘未来</span>
 			<span class="hero-en">Web Agent</span>
@@ -654,6 +654,16 @@
 
 	<section class="changelog">
 		<div class="changelog-title">更新记录</div>
+
+		<div class="changelog-day">
+			<div class="changelog-date">2026-05-10</div>
+			<ul class="changelog-list">
+				<li>脚本化流程冷却倒计时改为从「开启成功」toast 起算（<code>verify.activationSuccess</code>），随机点击间隔 + 每行 0–800ms 抖动，节奏更像人</li>
+				<li>HUD 新增独立 ticker 行，冷却倒计时与点击步骤并行显示</li>
+				<li>「PDD 批量暂停」更名为「PDD 批量推广001」（语义更准确：目标是未开启行）</li>
+				<li>网站本地开发自动启用 HTTPS（vite 自动检测 mkcert 证书），bookmarklet 默认 https 链接</li>
+			</ul>
+		</div>
 
 		<div class="changelog-day">
 			<div class="changelog-date">2026-04-30</div>
