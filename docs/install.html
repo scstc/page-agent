@@ -110,6 +110,79 @@
 		100% { transform: translate3d(-22px, 22px, 0) scale(1);    opacity: 0.7; }
 	}
 
+	/* ---------- Layer: AI 机器人 + 笔记本（散布在四角的背景层） ---------- */
+	.layer-robots {
+		z-index: 0;
+	}
+	.robot-symbol-host {
+		position: absolute;
+		width: 0;
+		height: 0;
+		overflow: hidden;
+	}
+	.robot {
+		position: absolute;
+		pointer-events: none;
+		mix-blend-mode: screen;
+		will-change: transform;
+	}
+	.robot-svg {
+		width: 100%;
+		height: auto;
+		display: block;
+		fill: none;
+		stroke: var(--neon-cyan);
+		stroke-width: 1.4;
+		stroke-linejoin: round;
+		stroke-linecap: round;
+	}
+	/* Inner detail animations — apply via class so they cross the <use> shadow boundary. */
+	.robot-svg .accent { stroke: var(--neon-pink); }
+	.robot-svg .led {
+		fill: var(--neon-pink);
+		stroke: none;
+		animation: robotLed 2.4s ease-in-out infinite;
+	}
+	.robot-svg .led-eye { animation-duration: 3.6s; }
+	.robot-svg .antenna-tip {
+		fill: var(--neon-yellow);
+		stroke: none;
+		transform-origin: 160px 35px;
+		animation: antennaPulse 1.8s ease-in-out infinite;
+	}
+	.robot-svg .code-line {
+		stroke: var(--neon-cyan);
+		stroke-width: 1.2;
+		opacity: 0;
+		animation: codeType 4.2s ease-in-out infinite;
+	}
+	.robot-svg .code-line:nth-of-type(2) { animation-delay: 0.6s; }
+	.robot-svg .code-line:nth-of-type(3) { animation-delay: 1.2s; }
+	.robot-svg .code-line:nth-of-type(4) { animation-delay: 1.8s; }
+
+	@keyframes robotBob       { 0%, 100% { transform: translateY(0); }            50% { transform: translateY(-5px); } }
+	@keyframes robotBobFlip   { 0%, 100% { transform: scaleX(-1) translateY(0); } 50% { transform: scaleX(-1) translateY(-5px); } }
+	@keyframes robotLed       { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+	@keyframes antennaPulse   { 0%, 100% { opacity: 0.55; transform: scale(1); } 50% { opacity: 1; transform: scale(1.4); } }
+	@keyframes codeType       { 0% { opacity: 0; } 15% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
+
+	/* Per-instance: size, position, opacity, bob phase, optional horizontal flip. */
+	.robot--br { right: 3vw;  bottom: 6vh;  width: 340px; max-width: 28vw; opacity: 0.22; animation: robotBob     5s   ease-in-out infinite; }
+	.robot--bl { left:  5vw;  bottom: 8vh;  width: 200px; max-width: 18vw; opacity: 0.14; animation: robotBobFlip 5.5s ease-in-out infinite; animation-delay: -1.5s; }
+	.robot--tl { left:  4vw;  top:    14vh; width: 220px; max-width: 18vw; opacity: 0.13; animation: robotBobFlip 6.5s ease-in-out infinite; animation-delay: -2s; }
+	.robot--tr { right: 6vw;  top:    10vh; width: 130px; max-width: 14vw; opacity: 0.10; animation: robotBob     8s   ease-in-out infinite; animation-delay: -3.5s; }
+	.robot--ml { left:  2vw;  bottom: 38vh; width: 110px; max-width: 11vw; opacity: 0.09; animation: robotBob     7s   ease-in-out infinite; animation-delay: -1s; }
+
+	@media (max-width: 720px) {
+		.robot--ml, .robot--tr, .robot--bl { display: none; }
+		.robot--br { width: 200px; opacity: 0.16; }
+		.robot--tl { width: 130px; opacity: 0.10; }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.robot, .robot-svg, .robot-svg * { animation: none !important; }
+		.robot-svg .code-line { opacity: 0.6 !important; }
+	}
+
 	main {
 		max-width: 580px;
 		margin: 0 auto;
@@ -598,6 +671,40 @@
 <div class="layer layer-grid" aria-hidden="true"></div>
 <div class="layer layer-aurora" aria-hidden="true"></div>
 <div class="layer layer-spotlight" aria-hidden="true"></div>
+<!-- 共享的机器人 SVG 符号定义（不渲染，仅供 <use> 复用） -->
+<svg class="robot-symbol-host" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+	<defs>
+		<symbol id="robot-laptop" viewBox="0 0 320 320">
+			<line class="accent" x1="160" y1="60" x2="160" y2="40"/>
+			<circle class="antenna-tip" cx="160" cy="35" r="3.5"/>
+			<rect x="110" y="60" width="100" height="80" rx="14"/>
+			<rect class="accent" x="120" y="80" width="80" height="32" rx="6"/>
+			<circle class="led led-eye" cx="138" cy="96" r="3.2"/>
+			<circle class="led led-eye" cx="182" cy="96" r="3.2"/>
+			<line x1="135" y1="124" x2="185" y2="124"/>
+			<line x1="142" y1="130" x2="178" y2="130"/>
+			<rect x="148" y="140" width="24" height="14"/>
+			<rect x="100" y="154" width="120" height="58" rx="8"/>
+			<circle class="led" cx="160" cy="183" r="5"/>
+			<path class="arm-l" d="M100 178 L78 215 L102 240"/>
+			<path class="arm-r" d="M220 178 L242 215 L218 240"/>
+			<rect x="78" y="200" width="164" height="56" rx="4"/>
+			<line class="code-line" x1="86" y1="212" x2="130" y2="212"/>
+			<line class="code-line" x1="86" y1="222" x2="178" y2="222"/>
+			<line class="code-line" x1="86" y1="232" x2="155" y2="232"/>
+			<line class="code-line" x1="86" y1="242" x2="200" y2="242"/>
+			<path d="M68 256 L252 256 L262 274 L58 274 Z"/>
+			<line class="accent" x1="142" y1="265" x2="178" y2="265"/>
+		</symbol>
+	</defs>
+</svg>
+<div class="layer layer-robots" aria-hidden="true">
+	<div class="robot robot--br"><svg class="robot-svg" viewBox="0 0 320 320"><use href="#robot-laptop"/></svg></div>
+	<div class="robot robot--bl"><svg class="robot-svg" viewBox="0 0 320 320"><use href="#robot-laptop"/></svg></div>
+	<div class="robot robot--tl"><svg class="robot-svg" viewBox="0 0 320 320"><use href="#robot-laptop"/></svg></div>
+	<div class="robot robot--tr"><svg class="robot-svg" viewBox="0 0 320 320"><use href="#robot-laptop"/></svg></div>
+	<div class="robot robot--ml"><svg class="robot-svg" viewBox="0 0 320 320"><use href="#robot-laptop"/></svg></div>
+</div>
 <div class="layer layer-scanlines" aria-hidden="true"></div>
 
 <main>
