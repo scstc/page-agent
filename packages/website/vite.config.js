@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react-swc'
 import { config as dotenvConfig } from 'dotenv'
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import process from 'node:process'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
@@ -68,11 +68,22 @@ function spaRoutes() {
 	}
 }
 
+const certDir = resolve(__dirname, '../page-agent/.dev-certs')
+const certPath = join(certDir, 'localhost+2.pem')
+const keyPath = join(certDir, 'localhost+2-key.pem')
+const httpsCerts =
+	existsSync(certPath) && existsSync(keyPath)
+		? { cert: readFileSync(certPath), key: readFileSync(keyPath) }
+		: null
+
 // Website Config (React Documentation Site)
 export default defineConfig(({ mode }) => ({
 	base: '/page-agent/',
 	clearScreen: false,
 	plugins: [react(), tailwindcss(), spaRoutes()],
+	server: {
+		...(httpsCerts && { https: httpsCerts }),
+	},
 	build: {
 		chunkSizeWarningLimit: 2000,
 		cssCodeSplit: true,
