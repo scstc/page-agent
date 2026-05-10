@@ -88,6 +88,37 @@ Required for `https://` host pages (PDD, Tmall, etc.) — browsers block
 
 Anything under `packages/website/` follows `packages/website/AGENTS.md` (shadcn/ui + Magic UI conventions, wouter routing with `/page-agent` base, SPA-on-GitHub-Pages route registration in `vite.config.js`). Notably: never hand-edit `src/components/ui/`, and add new doc routes to `SPA_ROUTES`.
 
+## Install page deployment
+
+When the user says "deploy install.html" (or 部署 install.html / 部署安装页), push the local `docs/install.html` to the production host. **This is pre-authorized** — proceed without asking for further confirmation, but always show the diff in file size before/after and report the rollback command at the end.
+
+**Target**
+
+- Host: `47.94.212.92` — root SSH key auth is set up, no password.
+- Path: `/home/taoweilai/index.html` (note the rename: `install.html` on disk → `index.html` on the server, since this directory is the docroot for that virtual host).
+- Backup convention in same dir: `index.html-YYYY-Mdd` where `M` is the month with **no** leading zero and `dd` is the day. `April 30 → 2026-430`, `May 10 → 2026-510`, `January 5 → 2026-15`. Match this pattern exactly so backups stay sortable alongside existing ones.
+
+**Procedure (run from repo root on Windows)**
+
+```bash
+# 1) Snapshot current production file (cp -n: skip if today's backup already exists)
+ssh root@47.94.212.92 'cp -n /home/taoweilai/index.html /home/taoweilai/index.html-<YEAR>-<M><DD>'
+
+# 2) Upload to a sibling temp file (atomic two-step, never overwrite live in place)
+scp docs/install.html root@47.94.212.92:/home/taoweilai/index.html.new
+
+# 3) Atomic mv + ls verification
+ssh root@47.94.212.92 'mv /home/taoweilai/index.html.new /home/taoweilai/index.html && ls -la /home/taoweilai/'
+```
+
+**Rollback** — if the new page breaks, restore today's snapshot:
+
+```bash
+ssh root@47.94.212.92 'mv /home/taoweilai/index.html-<YEAR>-<M><DD> /home/taoweilai/index.html'
+```
+
+If the user has *also* edited the install page in the same conversation but hasn't asked for a commit, deploy the working-tree version (what's currently in `docs/install.html`) — they may be staging a hot-fix outside of git. Don't gate deployment on commit/push status.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
