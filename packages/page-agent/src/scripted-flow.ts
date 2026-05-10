@@ -145,6 +145,15 @@ export interface ScriptedFlowConfig {
 	/** Show the visual mask + animated cursor. Default: true. */
 	enableMask?: boolean
 
+	/**
+	 * When true, before processing each row the runner reads the row's
+	 * "直接成交笔数" cell (located by matching the table's `<thead>` header text
+	 * to the same column index). If the value is > 0, the row is skipped under
+	 * `stats.rowsSkippedHasSales`. Useful for batch-pausing only the promotions
+	 * that haven't sold yet. Default: false.
+	 */
+	skipIfHasDirectSales?: boolean
+
 	/** Dry-run: log every intended action but don't actually click anything. */
 	dryRun?: boolean
 
@@ -196,6 +205,7 @@ interface ResolvedConfig {
 	}
 	retry: { backoffMs: number[] }
 	enableMask: boolean
+	skipIfHasDirectSales: boolean
 	dryRun: boolean
 	maxPages: number
 	startPage: number
@@ -312,6 +322,7 @@ function resolveConfig(c: ScriptedFlowConfig): ResolvedConfig {
 			backoffMs: c.retry?.backoffMs ?? [1000, 2000, 4000],
 		},
 		enableMask: c.enableMask ?? true,
+		skipIfHasDirectSales: c.skipIfHasDirectSales ?? false,
 		dryRun: c.dryRun ?? false,
 		maxPages: c.maxPages ?? 200,
 		startPage: Math.max(1, Math.floor(c.startPage ?? 1)),
@@ -709,6 +720,7 @@ const randomBetween = (min: number, max: number): number =>
 interface HUDStats {
 	rowsActioned: number
 	rowsSkippedOpen: number
+	rowsSkippedHasSales: number
 	rowsWithoutToggle: number
 	errors: number
 }
@@ -811,7 +823,7 @@ class FlowHUD {
 				: `🔘 — / ${ctx.rowsTotal} 行`
 		this.titleEl.innerHTML = `🤖 Scripted Flow &nbsp; <span style="opacity:0.55;font-weight:400">${pageLine} &nbsp; ${rowLine}</span>`
 		this.statusEl.innerHTML = status
-		this.statsEl.innerHTML = `✓ 已暂停 <b>${stats.rowsActioned}</b> &nbsp; ⏭ 已开/无开关 <b>${stats.rowsSkippedOpen + stats.rowsWithoutToggle}</b> &nbsp; ✗ 失败 <b>${stats.errors}</b>`
+		this.statsEl.innerHTML = `✓ 已暂停 <b>${stats.rowsActioned}</b> &nbsp; ⏭ 跳过 <b>${stats.rowsSkippedOpen + stats.rowsSkippedHasSales + stats.rowsWithoutToggle}</b> &nbsp; ✗ 失败 <b>${stats.errors}</b>`
 	}
 
 	/**
@@ -868,7 +880,7 @@ class FlowHUD {
 		this.titleEl.innerHTML =
 			'🤖 Scripted Flow &nbsp; <span style="opacity:0.55;font-weight:400">已结束</span>'
 		this.statusEl.innerHTML = message
-		this.statsEl.innerHTML = `✓ 已暂停 <b>${stats.rowsActioned}</b> &nbsp; ⏭ 已开/无开关 <b>${stats.rowsSkippedOpen + stats.rowsWithoutToggle}</b> &nbsp; ✗ 失败 <b>${stats.errors}</b>`
+		this.statsEl.innerHTML = `✓ 已暂停 <b>${stats.rowsActioned}</b> &nbsp; ⏭ 跳过 <b>${stats.rowsSkippedOpen + stats.rowsSkippedHasSales + stats.rowsWithoutToggle}</b> &nbsp; ✗ 失败 <b>${stats.errors}</b>`
 		// Keep the HUD visible longer when there are errors so the user can read them.
 		const lingerMs = this.errors.length > 0 ? 60_000 : 10_000
 		setTimeout(() => this.dispose(), lingerMs)
@@ -910,6 +922,7 @@ export async function runScriptedFlow(rawConfig: ScriptedFlowConfig): Promise<vo
 		rowsScanned: 0,
 		rowsActioned: 0,
 		rowsSkippedOpen: 0,
+		rowsSkippedHasSales: 0,
 		rowsWithoutToggle: 0,
 		errors: 0,
 	}
@@ -988,6 +1001,16 @@ export async function runScriptedFlow(rawConfig: ScriptedFlowConfig): Promise<vo
 					stats.rowsWithoutToggle++
 					hud?.update(ctx, '⏭ 跳过：无开关（表头/分隔行）', stats)
 					continue
+				}
+
+				if (config.skipIfHasDirectSales) {
+					const sales = getRowDirectSalesCount(row)
+					if (sales !== null && sales > 0) {
+						log(`Row ${i}: 直接成交笔数 = ${sales}, skipping`)
+						stats.rowsSkippedHasSales++
+						hud?.update(ctx, `⏭ 跳过：已有 ${sales} 笔直接成交`, stats)
+						continue
+					}
 				}
 
 				const open = config.isOpen(toggle)
@@ -1658,6 +1681,25 @@ function setStoredCountdownSec(item: ScriptedFlowItem, sec: number): void {
 
 const START_PAGE_STORAGE_PREFIX = 'page-agent:scripted-flow:start-page:'
 const START_ROW_STORAGE_PREFIX = 'page-agent:scripted-flow:start-row:'
+const SKIP_HAS_SALES_STORAGE_PREFIX = 'page-agent:scripted-flow:skip-has-sales:'
+
+function getStoredBool(key: string, fallback: boolean): boolean {
+	try {
+		const raw = localStorage.getItem(key)
+		if (raw === null) return fallback
+		return raw === '1' || raw === 'true'
+	} catch {
+		return fallback
+	}
+}
+
+function setStoredBool(key: string, v: boolean): void {
+	try {
+		localStorage.setItem(key, v ? '1' : '0')
+	} catch {
+		// ignore
+	}
+}
 
 function getStoredPositiveInt(key: string, fallback: number): number {
 	try {
@@ -1678,6 +1720,31 @@ function setStoredPositiveInt(key: string, n: number): void {
 	} catch {
 		// ignore
 	}
+}
+
+/**
+ * Read a row's "直接成交笔数" (direct sales count) by locating the matching
+ * header in the same `<table>`'s `<thead>` and reading the cell at the same
+ * column index. Returns null when the column or cell can't be resolved (caller
+ * treats null as "unknown — don't skip").
+ *
+ * PDD's anq-table data row has 1:1 cells with the header `<tr>`, so column
+ * index transfers directly. The cell renders as `<span>{n}</span>` with comma
+ * thousands separators on large numbers, so we strip them before parseInt.
+ */
+function getRowDirectSalesCount(row: HTMLElement): number | null {
+	const table = row.closest('table')
+	if (!table) return null
+	const headerRow = table.querySelector<HTMLElement>('thead tr')
+	if (!headerRow) return null
+	const headers = Array.from(headerRow.children)
+	const idx = headers.findIndex((h) => (h.textContent ?? '').includes('直接成交笔数'))
+	if (idx < 0) return null
+	const cell = row.children[idx] as HTMLElement | undefined
+	if (!cell) return null
+	const raw = (cell.textContent ?? '').replace(/[,，\s]/g, '')
+	const n = parseInt(raw, 10)
+	return Number.isFinite(n) ? n : null
 }
 
 /**
@@ -1716,16 +1783,16 @@ function buildPopoverItem(
 	refresh: () => void
 ): HTMLElement {
 	const accent = POPOVER_ACCENT_RGBS[index % POPOVER_ACCENT_RGBS.length]
-	// Use a div + role=button so we can nest a native <input> inside (which is
-	// invalid HTML inside <button>). Keyboard activation is handled below.
+	// The card itself is a passive container; only the explicit Start button
+	// triggers a launch. This avoids accidental fires while users adjust P / R /
+	// Wait / skip-toggle controls inside the card.
 	const itemEl = document.createElement('div')
-	itemEl.setAttribute('role', 'button')
-	itemEl.tabIndex = 0
 	itemEl.dataset.index = String(index)
 	Object.assign(itemEl.style, {
 		display: 'flex',
-		alignItems: 'center',
-		gap: '10px',
+		flexDirection: 'column',
+		alignItems: 'stretch',
+		gap: '8px',
 		width: '100%',
 		textAlign: 'left',
 		padding: '10px 14px',
@@ -1735,10 +1802,9 @@ function buildPopoverItem(
 		borderLeft: `3px solid rgba(${accent}, 0.85)`,
 		borderRadius: '8px',
 		color: 'white',
-		cursor: 'pointer',
 		fontFamily: 'inherit',
 		boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.1), 0 1px 3px rgba(0,0,0,0.15)',
-		transition: 'background 0.15s ease, transform 0.15s ease',
+		transition: 'background 0.15s ease',
 		boxSizing: 'border-box',
 	})
 
@@ -1767,13 +1833,53 @@ function buildPopoverItem(
 		fontSize: '11px',
 		lineHeight: '1.3',
 		color: 'rgba(255,255,255,0.55)',
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap',
+		whiteSpace: 'normal',
+		wordBreak: 'break-word',
 	})
 	descEl.textContent = item.description
 	body.append(nameEl, descEl)
-	itemEl.appendChild(body)
+
+	const topRow = document.createElement('div')
+	Object.assign(topRow.style, {
+		display: 'flex',
+		alignItems: 'flex-start',
+		gap: '10px',
+	})
+
+	const startBtn = document.createElement('button')
+	startBtn.type = 'button'
+	startBtn.textContent = isZhLanguage() ? '开始 ▶' : 'Start ▶'
+	Object.assign(startBtn.style, {
+		flexShrink: '0',
+		alignSelf: 'center',
+		padding: '6px 12px',
+		background: `rgba(${accent}, 0.85)`,
+		color: 'white',
+		border: 'none',
+		borderRadius: '6px',
+		cursor: 'pointer',
+		fontFamily: 'inherit',
+		fontSize: '12px',
+		fontWeight: '600',
+		letterSpacing: '0.02em',
+		boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+		transition: 'background 0.15s ease, transform 0.05s ease',
+	})
+	startBtn.addEventListener('mouseenter', () => {
+		startBtn.style.background = `rgba(${accent}, 1)`
+	})
+	startBtn.addEventListener('mouseleave', () => {
+		startBtn.style.background = `rgba(${accent}, 0.85)`
+	})
+	startBtn.addEventListener('mousedown', () => {
+		startBtn.style.transform = 'translateY(1px)'
+	})
+	startBtn.addEventListener('mouseup', () => {
+		startBtn.style.transform = ''
+	})
+
+	topRow.append(body, startBtn)
+	itemEl.appendChild(topRow)
 	itemEl.title = item.description
 
 	// Right-side compact controls: start page / start row / countdown.
@@ -1786,7 +1892,7 @@ function buildPopoverItem(
 	const stopBubble = (e: Event): void => e.stopPropagation()
 	const enterLaunches = (e: KeyboardEvent): void => {
 		e.stopPropagation()
-		if (e.key === 'Enter') itemEl.click()
+		if (e.key === 'Enter') startBtn.click()
 	}
 	const inputBaseStyle: Record<string, string> = {
 		padding: '2px 4px',
@@ -1900,6 +2006,8 @@ function buildPopoverItem(
 		alignItems: 'center',
 		gap: '6px',
 		flexShrink: '0',
+		alignSelf: 'flex-start',
+		flexWrap: 'wrap',
 	})
 
 	const rowValues = paging?.perPage ? Array.from({ length: paging.perPage }, (_, i) => i + 1) : null
@@ -1930,6 +2038,77 @@ function buildPopoverItem(
 	right.appendChild(buildSubUnit(isZh ? '页' : 'P', pageCtrl.element, '', pageTooltip))
 	right.appendChild(buildSubUnit(isZh ? '行' : 'R', rowCtrl.element, '', rowTooltip))
 
+	// "Skip rows with direct sales > 0" toggle, rendered as a sliding switch
+	// (track + animated handle). The native checkbox is hidden but kept inside
+	// the label for accessibility and to drive state via the implicit
+	// label-for-control association. State persists per-preset in localStorage.
+	const skipKey = SKIP_HAS_SALES_STORAGE_PREFIX + item.name
+	const skipChip = document.createElement('label')
+	Object.assign(skipChip.style, subUnitStyle)
+	skipChip.style.cursor = 'pointer'
+	skipChip.title = isZh
+		? '开启后：直接成交笔数 > 0 的行直接跳过'
+		: 'When ON: skip rows whose 直接成交笔数 > 0'
+
+	const skipLabel = document.createElement('span')
+	skipLabel.textContent = isZh ? '跳过已成交' : 'Skip sold'
+	Object.assign(skipLabel.style, labelStyle)
+
+	const skipCb = document.createElement('input')
+	skipCb.type = 'checkbox'
+	skipCb.checked = getStoredBool(skipKey, false)
+	Object.assign(skipCb.style, {
+		position: 'absolute',
+		width: '1px',
+		height: '1px',
+		opacity: '0',
+		pointerEvents: 'none',
+	})
+
+	const switchTrack = document.createElement('span')
+	Object.assign(switchTrack.style, {
+		position: 'relative',
+		display: 'inline-block',
+		width: '24px',
+		height: '14px',
+		borderRadius: '999px',
+		background: 'rgba(255,255,255,0.18)',
+		transition: 'background 0.15s ease',
+		flexShrink: '0',
+	})
+	const switchHandle = document.createElement('span')
+	Object.assign(switchHandle.style, {
+		position: 'absolute',
+		top: '1px',
+		left: '1px',
+		width: '12px',
+		height: '12px',
+		borderRadius: '50%',
+		background: 'white',
+		transition: 'transform 0.15s ease',
+		boxShadow: '0 1px 2px rgba(0,0,0,0.35)',
+	})
+	switchTrack.appendChild(switchHandle)
+
+	const renderSkipState = (): void => {
+		switchTrack.style.background = skipCb.checked
+			? `rgba(${accent}, 0.85)`
+			: 'rgba(255,255,255,0.18)'
+		switchHandle.style.transform = skipCb.checked ? 'translateX(10px)' : 'translateX(0)'
+	}
+	renderSkipState()
+
+	skipCb.addEventListener('change', () => {
+		renderSkipState()
+		setStoredBool(skipKey, skipCb.checked)
+	})
+	skipChip.addEventListener('click', stopBubble)
+
+	skipChip.appendChild(skipCb)
+	skipChip.appendChild(skipLabel)
+	skipChip.appendChild(switchTrack)
+	right.appendChild(skipChip)
+
 	let countdownInput: HTMLInputElement | null = null
 	if (hasCountdown) {
 		countdownInput = document.createElement('input')
@@ -1954,7 +2133,7 @@ function buildPopoverItem(
 		})
 		right.appendChild(
 			buildSubUnit(
-				'',
+				isZh ? '间隔时间' : 'Wait',
 				countdownInput,
 				's',
 				isZh ? '点击编辑倒计时秒数' : 'Click to edit countdown seconds'
@@ -1966,11 +2145,9 @@ function buildPopoverItem(
 
 	itemEl.addEventListener('mouseenter', () => {
 		itemEl.style.background = `linear-gradient(135deg, rgba(${accent}, 0.28), rgba(${accent}, 0.12))`
-		itemEl.style.transform = 'translateX(1px)'
 	})
 	itemEl.addEventListener('mouseleave', () => {
 		itemEl.style.background = `linear-gradient(135deg, rgba(${accent}, 0.18), rgba(${accent}, 0.06))`
-		itemEl.style.transform = ''
 	})
 
 	const launch = (): void => {
@@ -1979,12 +2156,15 @@ function buildPopoverItem(
 		// We clone instead of mutating so the original preset is untouched.
 		const startPage = pageCtrl.getValue()
 		const startRow = rowCtrl.getValue()
+		const skipIfHasDirectSales = skipCb.checked
 		setStoredPositiveInt(START_PAGE_STORAGE_PREFIX + item.name, startPage)
 		setStoredPositiveInt(START_ROW_STORAGE_PREFIX + item.name, startRow)
+		setStoredBool(skipKey, skipIfHasDirectSales)
 		let launchPreset: ScriptedFlowConfig = {
 			...item.preset,
 			startPage,
 			startRow,
+			skipIfHasDirectSales,
 		}
 		if (countdownInput) {
 			const sec = Math.max(0, parseInt(countdownInput.value, 10) || 0)
@@ -2005,12 +2185,9 @@ function buildPopoverItem(
 			.finally(refresh)
 	}
 
-	itemEl.addEventListener('click', launch)
-	itemEl.addEventListener('keydown', (e) => {
-		if (e.key === 'Enter' || e.key === ' ') {
-			e.preventDefault()
-			launch()
-		}
+	startBtn.addEventListener('click', (e) => {
+		e.stopPropagation()
+		launch()
 	})
 
 	return itemEl
