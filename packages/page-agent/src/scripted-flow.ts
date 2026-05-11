@@ -1724,18 +1724,22 @@ function setStoredPositiveInt(key: string, n: number): void {
 
 /**
  * Read a row's "直接成交笔数" (direct sales count) by locating the matching
- * header in the same `<table>`'s `<thead>` and reading the cell at the same
- * column index. Returns null when the column or cell can't be resolved (caller
- * treats null as "unknown — don't skip").
+ * header `<th>` and reading the cell at the same column index in the row.
+ * Returns null when the column or cell can't be resolved (caller treats null
+ * as "unknown — don't skip").
  *
- * PDD's anq-table data row has 1:1 cells with the header `<tr>`, so column
- * index transfers directly. The cell renders as `<span>{n}</span>` with comma
+ * PDD's anq-table is a div-grid: the `<thead class="anq-table-thead">` lives
+ * directly under the `.anq-table` wrapper, not inside any `<table>` element,
+ * so `row.closest('table')` finds an empty shell. We scope to the wrapping
+ * `.anq-table` and use `.anq-table-thead tr` to get the real header row.
+ * Header `<tr>` and data row have 1:1 children (25 each), so column index
+ * transfers directly. The cell renders as `<span>{n}</span>` with comma
  * thousands separators on large numbers, so we strip them before parseInt.
  */
 function getRowDirectSalesCount(row: HTMLElement): number | null {
-	const table = row.closest('table')
-	if (!table) return null
-	const headerRow = table.querySelector<HTMLElement>('thead tr')
+	const wrap = row.closest('.anq-table')
+	if (!wrap) return null
+	const headerRow = wrap.querySelector<HTMLElement>('.anq-table-thead tr')
 	if (!headerRow) return null
 	const headers = Array.from(headerRow.children)
 	const idx = headers.findIndex((h) => (h.textContent ?? '').includes('直接成交笔数'))
