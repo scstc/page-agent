@@ -1355,6 +1355,249 @@ export function stopScriptedFlow(): boolean {
 	return true
 }
 
+/**
+ * Activate-only flow — like `runScriptedFlow` but for presets that only need to
+ * flip every CLOSED row ON without a follow-up confirm popup. Used by PDD's
+ * "batch activate" preset where each row's promotion is opened with a single
+ * click and a success toast.
+ *
+ * Per-row behavior:
+ *   1. Skip rows with no toggle / already-OPEN / (optionally) direct-sales > 0.
+ *   2. Snapshot pre-existing matching toasts.
+ *   3. Click the toggle once.
+ *   4. If `confirm.verify` is configured, wait for a success/failure toast.
+ *      On verified failure, halt the entire flow (traceability over success
+ *      rate — user resumes via startPage / startRow after fixing the cause).
+ *      Fallback: if no toast appears but the toggle now reads OPEN, treat as
+ *      success (PDD occasionally suppresses the toast on rapid opens).
+ *   5. Wait the user-configured inter-row interval (`delays.beforeConfirm`,
+ *      repurposed semantics — same field as the pause flow's cooldown anchor,
+ *      reused so the existing popover countdown chip works unchanged).
+ *
+ * The page-loop / startPage / startRow / next-page logic is identical to the
+ * pause flow; only the per-row action differs. Stays in this file because both
+ * runners share `runningHandle`, `FlowHUD`, `resolveConfig`, and the toast
+ * verification helpers.
+ */
+export async function runActivateFlow(rawConfig: ScriptedFlowConfig): Promise<void> {
+	if (isScriptedFlowRunning()) {
+		throw new Error('A scripted flow is already running. Call stopScriptedFlow() first.')
+	}
+
+	const config = resolveConfig(rawConfig)
+	const { log } = config
+
+	const handle: AbortHandle = { aborted: false }
+	runningHandle = handle
+
+	const controller = new PageController({ enableMask: config.enableMask })
+	if (config.enableMask) await controller.showMask()
+
+	const hud = config.enableMask ? new FlowHUD() : null
+
+	const stats = {
+		pagesProcessed: 0,
+		rowsScanned: 0,
+		rowsActioned: 0,
+		rowsSkippedOpen: 0,
+		rowsSkippedHasSales: 0,
+		rowsWithoutToggle: 0,
+		errors: 0,
+	}
+
+	const ctx: HUDContext = { page: 0, maxPages: config.maxPages, row: -1, rowsTotal: 0 }
+
+	try {
+		log('Starting activate-only flow', config)
+		hud?.update(ctx, '🚀 启动中…', stats)
+
+		if (config.startPage > 1) {
+			if (handle.aborted) throw new AbortError()
+			const container = document.querySelector<HTMLElement>(config.pagination.containerSelector)
+			if (!container) {
+				throw new LocationNotFoundError(`找不到分页容器 (${config.pagination.containerSelector})`)
+			}
+			const current = config.pagination.getCurrentPage(container)
+			if (current !== config.startPage) {
+				const btn = config.pagination.findPageButton(config.startPage, container)
+				if (!btn) {
+					throw new LocationNotFoundError(
+						`第 ${config.startPage} 页不在当前分页条可见范围内（请先点 … 或相邻页码让它出现）`
+					)
+				}
+				hud?.update(ctx, `⏭ 跳到第 ${config.startPage} 页`, stats)
+				log(`Navigating to startPage ${config.startPage} via pagination button`)
+				if (config.dryRun) {
+					log(`[dryRun] would click page button ${config.startPage}`)
+				} else {
+					await clickElement(btn)
+					await abortableSleep(config.delays.afterPageChange, handle)
+				}
+			} else {
+				log(`Already on startPage ${config.startPage}, skipping navigation`)
+			}
+		}
+
+		for (let pageNum = config.startPage; pageNum <= config.maxPages; pageNum++) {
+			if (handle.aborted) throw new AbortError()
+			ctx.page = pageNum
+			ctx.row = -1
+			log(`--- Activating page ${pageNum} ---`)
+
+			const rows = Array.from(document.querySelectorAll<HTMLElement>(config.rowSelector)).filter(
+				isVisible
+			)
+			ctx.rowsTotal = rows.length
+			log(`Found ${rows.length} rows on page ${pageNum}`)
+			hud?.update(ctx, `📋 扫描到 ${rows.length} 行`, stats)
+			stats.pagesProcessed++
+
+			const rowStartIdx = pageNum === config.startPage ? config.startRow - 1 : 0
+			if (pageNum === config.startPage && config.startRow > rows.length) {
+				throw new LocationNotFoundError(
+					`第 ${config.startPage} 页只有 ${rows.length} 行，找不到第 ${config.startRow} 行`
+				)
+			}
+
+			for (let i = rowStartIdx; i < rows.length; i++) {
+				if (handle.aborted) throw new AbortError()
+				const row = rows[i]
+				ctx.row = i
+				stats.rowsScanned++
+
+				const toggle = row.querySelector<HTMLElement>(config.toggleSelector)
+				if (!toggle) {
+					stats.rowsWithoutToggle++
+					hud?.update(ctx, '⏭ 跳过：无开关（表头/分隔行）', stats)
+					continue
+				}
+
+				if (config.skipIfHasDirectSales) {
+					const sales = getRowDirectSalesCount(row)
+					if (sales !== null && sales > 0) {
+						log(`Row ${i}: 直接成交笔数 = ${sales}, skipping`)
+						stats.rowsSkippedHasSales++
+						hud?.update(ctx, `⏭ 跳过：已有 ${sales} 笔直接成交`, stats)
+						continue
+					}
+				}
+
+				if (config.isOpen(toggle)) {
+					log(`Row ${i}: toggle is OPEN, skipping`)
+					stats.rowsSkippedOpen++
+					hud?.update(ctx, '⏭ 跳过：开关已打开', stats)
+					continue
+				}
+
+				log(`Row ${i}: toggle is CLOSED, activating`)
+				try {
+					await activateRow(row, config, handle, hud, ctx, stats)
+					stats.rowsActioned++
+					hud?.update(ctx, '✅ 已开启', stats)
+				} catch (err) {
+					if (err instanceof AbortError) throw err
+					stats.errors++
+					const message = (err as Error).message
+					hud?.update(ctx, `❌ 失败：${message}`, stats)
+					hud?.addError({ page: pageNum, row: i, message })
+					throw new RetryExhaustedError(`第 ${pageNum} 页第 ${i + 1} 行：${message}`)
+				}
+
+				// Inter-row wait — only when there's another row coming on this page.
+				// Last row falls through to the afterPageChange wait so we don't
+				// double-pause at the page boundary.
+				const intervalMs = config.delays.beforeConfirm
+				if (intervalMs > 0 && i < rows.length - 1) {
+					const sec = Math.ceil(intervalMs / 1000)
+					hud?.update(ctx, `⏳ 等待 <b>${sec}</b>s 再处理下一行`, stats)
+					await abortableSleep(intervalMs, handle)
+				}
+			}
+
+			const nextBtn = document.querySelector<HTMLElement>(config.nextPage.selector)
+			if (!nextBtn) {
+				log('No next-page button found — flow complete')
+				hud?.update(ctx, '🏁 没有下一页按钮，流程结束', stats)
+				break
+			}
+			if (config.nextPage.isDisabled(nextBtn)) {
+				log('Next-page button is disabled — flow complete')
+				hud?.update(ctx, '🏁 下一页禁用，流程结束', stats)
+				break
+			}
+
+			log('Clicking next-page button')
+			hud?.update(ctx, '➡ 翻到下一页', stats)
+			if (config.dryRun) {
+				log('[dryRun] would click next-page')
+				break
+			}
+			await clickElement(nextBtn)
+			await abortableSleep(config.delays.afterPageChange, handle)
+		}
+
+		log('Activate-only flow finished', stats)
+		hud?.finish('🏁 流程结束', stats)
+	} catch (err) {
+		if (err instanceof AbortError) {
+			log('Activate flow aborted by user', stats)
+			hud?.finish('🛑 已停止', stats)
+		} else if (err instanceof RetryExhaustedError) {
+			log(`Activate flow halted: ${err.message}`, stats)
+			hud?.finish(`🛑 出错，已中止流程：${err.message}`, stats)
+		} else if (err instanceof LocationNotFoundError) {
+			log(`Activate flow halted: location not found — ${err.message}`, stats)
+			hud?.finish(`🛑 找不到指定位置：${err.message}`, stats)
+		} else {
+			log(`Activate flow errored: ${(err as Error).message}`, stats)
+			hud?.finish(`💥 出错：${(err as Error).message}`, stats)
+			throw err
+		}
+	} finally {
+		if (config.enableMask) await controller.hideMask()
+		controller.dispose()
+		if (runningHandle === handle) runningHandle = null
+	}
+}
+
+async function activateRow(
+	row: HTMLElement,
+	config: ResolvedConfig,
+	handle: AbortHandle,
+	hud: FlowHUD | null,
+	ctx: HUDContext,
+	stats: HUDStats
+): Promise<void> {
+	const { log } = config
+	const verify = config.confirm.verify
+
+	if (config.dryRun) {
+		log('[dryRun] would click toggle, verify activation toast')
+		return
+	}
+
+	// Re-query the toggle just before clicking — same defensive pattern pauseRow
+	// uses for retry attempts. PDD's React tree can replace the switch node.
+	const liveToggle = row.querySelector<HTMLElement>(config.toggleSelector)
+	if (!liveToggle) {
+		throw new Error('Toggle disappeared from row before activation')
+	}
+
+	const stale = verify ? snapshotMatchingToasts(verify) : null
+
+	hud?.update(ctx, '🖱 点击开关开启推广', stats)
+	await clickElement(liveToggle)
+
+	if (verify && stale) {
+		hud?.update(ctx, '⏳ 等待启动反馈…', stats)
+		const result = await waitForToastResult(verify, stale, handle)
+		if (!result.ok) {
+			throw new Error(result.message)
+		}
+		log(`Activation verified: ${result.message}`)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Presets
 // ---------------------------------------------------------------------------
@@ -1416,6 +1659,43 @@ export const pddPromotionPreset: ScriptedFlowConfig = {
 	enableMask: true,
 }
 
+/**
+ * Activate-only variant — opens every CLOSED row's switch once and waits the
+ * user-configured interval before moving to the next row. No popup, no confirm
+ * click. Used via `runActivateFlow`, dispatched from the popover by the
+ * matching `ScriptedFlowItem.runner`.
+ *
+ * `popup` is unused in this flow but kept to satisfy `ScriptedFlowConfig`'s
+ * required shape. `confirm.verify` is reused for post-click toast matching:
+ * success regex catches PDD's "开启成功" / "启动成功" / "启用成功" copy.
+ */
+export const pddActivatePreset: ScriptedFlowConfig = {
+	rowSelector: '.anq-table-row',
+	toggleSelector: '.anq-switch, [role="switch"]',
+	popup: {
+		// Unused in activate flow — the runner never waits for a popup.
+		selector: '.anq-popover',
+	},
+	confirm: {
+		verify: {
+			success: /(开启|启动|启用)成功/,
+			failure: /操作频繁|请稍后|请重试|请勿|频率|限流|太快|失败|错误|异常|不能|未能|无法|拒绝/,
+			timeoutMs: 3000,
+		},
+	},
+	nextPage: {
+		selector: '.anq-pagination-next',
+	},
+	delays: {
+		// "间隔时间" chip in the popover writes to this field. Repurposed from
+		// the pause flow's server-cooldown anchor — same field, new semantics
+		// (wait between rows). 5s default matches the toast-settle window.
+		beforeConfirm: 5000,
+		afterPageChange: 1500,
+	},
+	enableMask: true,
+}
+
 // ---------------------------------------------------------------------------
 // Panel button injection — adds a 🤖 button to the page-agent panel header,
 // to the LEFT of the ⚡ quick-tasks button. Click opens a popover listing
@@ -1433,6 +1713,11 @@ export interface ScriptedFlowItem {
 	description: string
 	/** Preset to run when the user clicks this item. */
 	preset: ScriptedFlowConfig
+	/**
+	 * Runner to invoke with the preset. Defaults to `runScriptedFlow` (the
+	 * pause/popup flow). The activate-only entry sets this to `runActivateFlow`.
+	 */
+	runner?: (config: ScriptedFlowConfig) => Promise<void>
 }
 
 export interface InjectButtonOptions {
@@ -1464,6 +1749,14 @@ function getDefaultItems(): ScriptedFlowItem[] {
 				? '拼多多推广列表 / 翻完全部页 / 暂停所有未开启行'
 				: 'Pinduoduo promotion list — paginate through all pages, pause every closed row',
 			preset: pddPromotionPreset,
+		},
+		{
+			name: isZh ? 'PDD 批量开启002' : 'PDD batch activate 002',
+			description: isZh
+				? '只开不关 — 翻完全部页，按你设置的间隔逐行开启 CLOSED 行'
+				: 'Activate-only — paginate through all pages, toggle every CLOSED row ON at your interval',
+			preset: pddActivatePreset,
+			runner: runActivateFlow,
 		},
 	]
 }
@@ -2184,7 +2477,8 @@ function buildPopoverItem(
 		pop.remove()
 		button.textContent = '⏹'
 		button.title = '停止脚本流程'
-		runScriptedFlow(launchPreset)
+		const runner = item.runner ?? runScriptedFlow
+		runner(launchPreset)
 			.catch((err) => console.error('[scripted-flow] failed:', err))
 			.finally(refresh)
 	}
@@ -2205,8 +2499,12 @@ function buildPopoverItem(
 declare global {
 	interface Window {
 		runScriptedFlow: typeof runScriptedFlow
+		runActivateFlow: typeof runActivateFlow
 		stopScriptedFlow: typeof stopScriptedFlow
 		isScriptedFlowRunning: typeof isScriptedFlowRunning
-		scriptedFlowPresets: { pddPromotion: ScriptedFlowConfig }
+		scriptedFlowPresets: {
+			pddPromotion: ScriptedFlowConfig
+			pddActivate: ScriptedFlowConfig
+		}
 	}
 }

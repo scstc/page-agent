@@ -10,7 +10,9 @@ import { PageAgent, type PageAgentConfig } from './PageAgent'
 import {
 	injectScriptedFlowButton,
 	isScriptedFlowRunning,
+	pddActivatePreset,
 	pddPromotionPreset,
+	runActivateFlow,
 	runScriptedFlow,
 	stopScriptedFlow,
 } from './scripted-flow'
@@ -23,9 +25,13 @@ if (window.pageAgent) {
 // Mount to global window object
 window.PageAgent = PageAgent
 window.runScriptedFlow = runScriptedFlow
+window.runActivateFlow = runActivateFlow
 window.stopScriptedFlow = stopScriptedFlow
 window.isScriptedFlowRunning = isScriptedFlowRunning
-window.scriptedFlowPresets = { pddPromotion: pddPromotionPreset }
+window.scriptedFlowPresets = {
+	pddPromotion: pddPromotionPreset,
+	pddActivate: pddActivatePreset,
+}
 
 console.log('🚀 page-agent.js loaded!')
 

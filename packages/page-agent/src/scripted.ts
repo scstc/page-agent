@@ -8,19 +8,26 @@
  */
 import {
 	isScriptedFlowRunning,
+	pddActivatePreset,
 	pddPromotionPreset,
+	runActivateFlow,
 	runScriptedFlow,
 	stopScriptedFlow,
 } from './scripted-flow'
 
 window.runScriptedFlow = runScriptedFlow
+window.runActivateFlow = runActivateFlow
 window.stopScriptedFlow = stopScriptedFlow
 window.isScriptedFlowRunning = isScriptedFlowRunning
-window.scriptedFlowPresets = { pddPromotion: pddPromotionPreset }
+window.scriptedFlowPresets = {
+	pddPromotion: pddPromotionPreset,
+	pddActivate: pddActivatePreset,
+}
 
 console.log('🤖 page-agent.scripted.js loaded')
-console.log('   Run:  window.runScriptedFlow(window.scriptedFlowPresets.pddPromotion)')
-console.log('   Stop: window.stopScriptedFlow()')
+console.log('   Pause:    window.runScriptedFlow(window.scriptedFlowPresets.pddPromotion)')
+console.log('   Activate: window.runActivateFlow(window.scriptedFlowPresets.pddActivate)')
+console.log('   Stop:     window.stopScriptedFlow()')
 
 /*
 Bookmarklet (dev, HTTPS via mkcert + http-server -S on :5174):
